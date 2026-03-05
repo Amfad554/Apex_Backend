@@ -15,11 +15,11 @@ const staffRoutes = require('./routes/staff');
 const appointmentRoutes = require('./routes/appointments');
 const prescriptionRoutes = require('./routes/prescriptions');
 const medicalRecordRoutes = require('./routes/medicalRecords');
-const staffPatientAuthRoutes = require('./routes/staffPatientAuth'); // ← separate file, not staff again
+const staffPatientAuthRoutes = require('./routes/staffpatientauth'); // ← separate file, not staff again
 
 // Initialize Express app
 const app = express();
-//2
+//
 // Middleware
 app.use(helmet());
 app.use(cors({
