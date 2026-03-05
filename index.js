@@ -19,7 +19,7 @@ const staffPatientAuthRoutes = require('./routes/staffPatientAuth'); // ← sepa
 
 // Initialize Express app
 const app = express();
-
+//2
 // Middleware
 app.use(helmet());
 app.use(cors({
