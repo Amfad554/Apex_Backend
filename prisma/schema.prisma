@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model SuperAdmin {
+  id                Int        @id @default(autoincrement())
+  username          String     @unique
+  passwordHash      String     @map("password_hash")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  approvedHospitals Hospital[] @relation("AdminApproval")
+
+  @@map("super_admins")
+}
+
+model Hospital {
+  id             Int             @id @default(autoincrement())
+  hospitalName   String          @map("hospital_name")
+  hospitalType   HospitalType    @map("hospital_type")
+  address        String
+  phone          String
+  email          String          @unique
+  licenseNumber  String          @unique @map("license_number")
+  adminName      String          @map("admin_name")
+  passwordHash   String          @map("password_hash")
+  status         HospitalStatus  @default(pending)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  approvedAt     DateTime?       @map("approved_at")
+  approvedBy     Int?            @map("approved_by")
+  appointments   Appointment[]
+  staff          HospitalStaff[]
+  approver       SuperAdmin?     @relation("AdminApproval", fields: [approvedBy], references: [id])
+  medicalRecords MedicalRecord[]
+  patients       Patient[]
+  prescriptions  Prescription[]
+
+  @@index([status])
+  @@index([email])
+  @@map("hospitals")
+}
+
+model HospitalStaff {
+  id             Int             @id @default(autoincrement())
+  hospitalId     Int             @map("hospital_id")
+  fullName       String          @map("full_name")
+  role           StaffRole
+  specialty      String?
+  department     String?
+  phone          String?
+  email          String
+  passwordHash   String          @map("password_hash")
+  status         StaffStatus     @default(active)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  appointments   Appointment[]
+  hospital       Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  medicalRecords MedicalRecord[]
+  prescriptions  Prescription[]
+
+  @@unique([hospitalId, email])
+  @@index([hospitalId])
+  @@map("hospital_staff")
+}
+
+model Patient {
+  id                Int             @id @default(autoincrement())
+  hospitalId        Int             @map("hospital_id")
+  patientNumber     String          @unique @map("patient_number")
+  fullName          String          @map("full_name")
+  dateOfBirth       DateTime        @map("date_of_birth")
+  gender            Gender
+  phone             String
+  email             String?
+  address           String
+  bloodGroup        String?         @map("blood_group")
+  medicalConditions String?         @map("medical_conditions")
+  nextOfKinName     String?         @map("next_of_kin_name")
+  nextOfKinPhone    String?         @map("next_of_kin_phone")
+  passwordHash      String?         @map("password_hash")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  appointments      Appointment[]
+  medicalRecords    MedicalRecord[]
+  hospital          Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  prescriptions     Prescription[]
+
+  @@unique([hospitalId, email])
+  @@index([hospitalId])
+  @@index([patientNumber])
+  @@map("patients")
+}
+
+model Appointment {
+  id              Int               @id @default(autoincrement())
+  hospitalId      Int               @map("hospital_id")
+  patientId       Int               @map("patient_id")
+  doctorId        Int               @map("doctor_id")
+  appointmentDate DateTime          @map("appointment_date") @db.Date
+  appointmentTime DateTime          @map("appointment_time") @db.Time(6)
+  reason          String
+  status          AppointmentStatus @default(scheduled)
+  notes           String?
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @default(now()) @updatedAt @map("updated_at")
+  doctor          HospitalStaff     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospital        Hospital          @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId])
+  @@index([patientId])
+  @@index([appointmentDate])
+  @@map("appointments")
+}
+
+model Prescription {
+  id             Int                @id @default(autoincrement())
+  hospitalId     Int                @map("hospital_id")
+  patientId      Int                @map("patient_id")
+  doctorId       Int                @map("doctor_id")
+  medication     String
+  dosage         String
+  duration       String
+  instructions   String?
+  refills        Int                @default(0)
+  status         PrescriptionStatus @default(active)
+  prescribedDate DateTime           @default(now()) @map("prescribed_date") @db.Date
+  createdAt      DateTime           @default(now()) @map("created_at")
+  doctor         HospitalStaff      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospital       Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  patient        Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("prescriptions")
+}
+
+model MedicalRecord {
+  id          Int           @id @default(autoincrement())
+  hospitalId  Int           @map("hospital_id")
+  patientId   Int           @map("patient_id")
+  doctorId    Int           @map("doctor_id")
+  recordType  RecordType    @map("record_type")
+  title       String
+  diagnosis   String?
+  findings    String?
+  testResults Json?         @map("test_results")
+  vitals      Json?
+  notes       String?
+  recordDate  DateTime      @default(now()) @map("record_date") @db.Date
+  createdAt   DateTime      @default(now()) @map("created_at")
+  doctor      HospitalStaff @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospital    Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  patient     Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("medical_records")
+}
+
+enum HospitalType {
+  public
+  private
+  specialty
+  clinic
+  medical_center
+}
+
+enum HospitalStatus {
+  pending
+  approved
+  suspended
+  rejected
+}
+
+enum StaffRole {
+  doctor
+  nurse
+  pharmacist
+  lab_staff
+  receptionist
+}
+
+enum StaffStatus {
+  active
+  inactive
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum AppointmentStatus {
+  scheduled
+  completed
+  cancelled
+  no_show
+}
+
+enum PrescriptionStatus {
+  active
+  completed
+  cancelled
+}
+
+enum RecordType {
+  lab_results
+  consultation
+  imaging
+  other
+}
