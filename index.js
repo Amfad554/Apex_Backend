@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
 
-const prisma = require('./Lib/prisma');
+const prisma = require('./lib/prisma');
 
 // Import routes
 const authRoutes = require('./routes/auth');
