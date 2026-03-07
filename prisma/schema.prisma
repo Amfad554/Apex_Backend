@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
 }
 
 model SuperAdmin {
@@ -31,6 +31,7 @@ model Hospital {
   createdAt      DateTime        @default(now()) @map("created_at")
   approvedAt     DateTime?       @map("approved_at")
   approvedBy     Int?            @map("approved_by")
+  subscription   Subscription?
   appointments   Appointment[]
   staff          HospitalStaff[]
   approver       SuperAdmin?     @relation("AdminApproval", fields: [approvedBy], references: [id])
@@ -41,6 +42,25 @@ model Hospital {
   @@index([status])
   @@index([email])
   @@map("hospitals")
+}
+
+model Subscription {
+  id          Int                @id @default(autoincrement())
+  hospitalId  Int                @unique @map("hospital_id")
+  plan        String
+  status      SubscriptionStatus @default(pending)
+  amount      Int
+  reference   String?
+  activatedAt DateTime?          @map("activated_at")
+  expiresAt   DateTime?          @map("expires_at")
+  activatedBy Int?               @map("activated_by")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at")
+  hospital    Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId])
+  @@index([status])
+  @@map("subscriptions")
 }
 
 model HospitalStaff {
@@ -170,6 +190,13 @@ enum HospitalStatus {
   approved
   suspended
   rejected
+}
+
+enum SubscriptionStatus {
+  pending
+  active
+  expired
+  cancelled
 }
 
 enum StaffRole {
