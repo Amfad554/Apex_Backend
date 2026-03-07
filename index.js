@@ -55,7 +55,7 @@ app.use('/api/medical-records', medicalRecordRoutes);
 
 const contactRoutes       = require('./routes/contact');
 const platformStatsRoutes = require('./routes/platformStats');
-const subscriptionRoutes = require('./routes/subscriptionRoutes');
+const subscriptionRoutes = require('./routes/Subscriptionroutes');
 app.use('/api/subscriptions', subscriptionRoutes);
 
 
