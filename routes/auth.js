@@ -8,7 +8,7 @@ const rateLimit = require('express-rate-limit');
 
 // ─── Rate limiter (brute-force protection) ────────────────────────────────────
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
@@ -26,7 +26,6 @@ router.post('/hospital/register', async (req, res) => {
       email, licenseNumber, adminName, password,
     } = req.body;
 
-    // ── Validation ──────────────────────────────────────────────────────────
     const missing = [];
     if (!hospitalName?.trim()) missing.push('hospitalName');
     if (!hospitalType) missing.push('hospitalType');
@@ -50,7 +49,6 @@ router.post('/hospital/register', async (req, res) => {
     if (!validTypes.includes(hospitalType.toLowerCase()))
       return res.status(400).json({ error: `hospitalType must be one of: ${validTypes.join(', ')}` });
 
-    // ── Duplicate check ─────────────────────────────────────────────────────
     const existing = await prisma.Hospital.findFirst({
       where: { OR: [{ email: email.toLowerCase().trim() }, { licenseNumber: licenseNumber.trim() }] },
     });
@@ -94,6 +92,11 @@ router.post('/hospital/login', loginLimiter, async (req, res) => {
 
     const hospital = await prisma.Hospital.findUnique({
       where: { email: email.toLowerCase().trim() },
+      include: {
+        subscription: {
+          select: { status: true, plan: true, expiresAt: true },
+        },
+      },
     });
 
     if (!hospital)
@@ -112,7 +115,10 @@ router.post('/hospital/login', loginLimiter, async (req, res) => {
     if (!isMatch)
       return res.status(401).json({ error: 'Invalid email or password.' });
 
-    // ── Token includes hospital_id so middleware can scope data ─────────────
+    // ── Subscription check ───────────────────────────────────────────────────
+    const sub = hospital.subscription;
+    const isActive = sub && sub.status === 'active' && (!sub.expiresAt || new Date(sub.expiresAt) > new Date());
+
     const token = jwt.sign(
       { id: hospital.id, hospital_id: hospital.id, role: 'hospital_admin' },
       process.env.JWT_SECRET,
@@ -122,6 +128,8 @@ router.post('/hospital/login', loginLimiter, async (req, res) => {
     return res.json({
       message: 'Login successful',
       token,
+      subscriptionStatus: sub?.status || 'none',  // 'none' | 'pending' | 'active' | 'expired'
+      requiresPayment: !isActive,                  // true if they must pay before using dashboard
       user: {
         id: hospital.id,
         name: hospital.hospitalName,
@@ -179,7 +187,6 @@ router.post('/staff/login', loginLimiter, async (req, res) => {
     if (!identifier || !password || !hospitalId)
       return res.status(400).json({ error: 'identifier, password, and hospitalId are required.' });
 
-    // Find staff by email within that hospital
     const staff = await prisma.hospitalStaff.findFirst({
       where: {
         hospitalId: parseInt(hospitalId),
@@ -223,17 +230,11 @@ router.post('/staff/login', loginLimiter, async (req, res) => {
 });
 
 // ─── POST /api/auth/staff/forgot-password ─────────────────────────────────────
-// Always returns 200 to prevent email enumeration
 router.post('/staff/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required.' });
-
-    // In production: look up staff, generate a hashed reset token,
-    // save it with an expiry, and email the link.
-    // We return 200 regardless to prevent email enumeration.
     console.log(`[Forgot password requested for: ${email}]`);
-
     return res.json({ message: 'If this email exists, a reset link has been sent.' });
   } catch (err) {
     console.error('[POST /auth/staff/forgot-password]', err);
