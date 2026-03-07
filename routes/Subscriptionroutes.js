@@ -1,22 +1,22 @@
-const express = require('express');
-const router = express.Router();
+const express    = require('express');
+const router     = express.Router();
 const nodemailer = require('nodemailer');
-const prisma = require('../lib/prisma');
+const prisma     = require('../lib/prisma');
 const { verifyToken, isHospitalAdmin, isSuperAdmin } = require('../middleware/authMiddleware');
 
 // ─── Email transporter ────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
 const PLAN_AMOUNTS = {
-    clinic: 490000,   // ₦4,900 in kobo
-    professional: 1990000,  // ₦19,900
-    enterprise: 4990000,  // ₦49,900
+  clinic:       490000,   // ₦4,900 in kobo
+  professional: 1990000,  // ₦19,900
+  enterprise:   4990000,  // ₦49,900
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -25,28 +25,28 @@ const PLAN_AMOUNTS = {
    Returns { status, plan, expiresAt } — used by the frontend guard.
 ───────────────────────────────────────────────────────────────────────────── */
 router.get('/status', verifyToken, isHospitalAdmin, async (req, res) => {
-    try {
-        const subscription = await prisma.subscription.findUnique({
-            where: { hospitalId: req.user.hospital_id },
-            select: {
-                status: true,
-                plan: true,
-                activatedAt: true,
-                expiresAt: true,
-                createdAt: true,
-            },
-        });
+  try {
+    const subscription = await prisma.subscription.findUnique({
+      where: { hospitalId: req.user.hospital_id },
+      select: {
+        status:      true,
+        plan:        true,
+        activatedAt: true,
+        expiresAt:   true,
+        createdAt:   true,
+      },
+    });
 
-        if (!subscription) {
-            // No subscription record at all — never submitted proof
-            return res.json({ status: 'none', plan: null });
-        }
-
-        return res.json(subscription);
-    } catch (err) {
-        console.error('[GET /subscriptions/status]', err);
-        return res.status(500).json({ error: 'Failed to fetch subscription status.' });
+    if (!subscription) {
+      // No subscription record at all — never submitted proof
+      return res.json({ status: 'none', plan: null });
     }
+
+    return res.json(subscription);
+  } catch (err) {
+    console.error('[GET /subscriptions/status]', err);
+    return res.status(500).json({ error: 'Failed to fetch subscription status.' });
+  }
 });
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -56,52 +56,52 @@ router.get('/status', verifyToken, isHospitalAdmin, async (req, res) => {
    Emails the admin (you) with all details + screenshot attached.
 ───────────────────────────────────────────────────────────────────────────── */
 router.post('/proof', async (req, res) => {
-    try {
-        const {
-            plan, amount,
-            name, email, hospital, phone,
-            reference,
-            screenshotBase64, screenshotName,
-        } = req.body;
+  try {
+    const {
+      plan, amount,
+      name, email, hospital, phone,
+      reference,
+      screenshotBase64, screenshotName,
+    } = req.body;
 
-        if (!name || !email || !phone || !reference || !screenshotBase64 || !plan) {
-            return res.status(400).json({ error: 'All fields including screenshot are required.' });
-        }
+    if (!name || !email || !phone || !reference || !screenshotBase64 || !plan) {
+      return res.status(400).json({ error: 'All fields including screenshot are required.' });
+    }
 
-        if (!PLAN_AMOUNTS[plan.toLowerCase()]) {
-            return res.status(400).json({ error: 'Invalid plan selected.' });
-        }
+    if (!PLAN_AMOUNTS[plan.toLowerCase()]) {
+      return res.status(400).json({ error: 'Invalid plan selected.' });
+    }
 
-        // Try to find the hospital by email so we can link the subscription
-        const hospitalRecord = await prisma.hospital.findUnique({
-            where: { email: email.toLowerCase().trim() },
-        });
+    // Try to find the hospital by email so we can link the subscription
+    const hospitalRecord = await prisma.hospital.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
 
-        // If hospital exists in DB, create/update the subscription record
-        if (hospitalRecord) {
-            await prisma.subscription.upsert({
-                where: { hospitalId: hospitalRecord.id },
-                update: { plan: plan.toLowerCase(), reference, status: 'pending', updatedAt: new Date() },
-                create: {
-                    hospitalId: hospitalRecord.id,
-                    plan: plan.toLowerCase(),
-                    reference,
-                    amount: PLAN_AMOUNTS[plan.toLowerCase()],
-                    status: 'pending',
-                },
-            });
-        }
+    // If hospital exists in DB, create/update the subscription record
+    if (hospitalRecord) {
+      await prisma.subscription.upsert({
+        where:  { hospitalId: hospitalRecord.id },
+        update: { plan: plan.toLowerCase(), reference, status: 'pending', updatedAt: new Date() },
+        create: {
+          hospitalId: hospitalRecord.id,
+          plan:       plan.toLowerCase(),
+          reference,
+          amount:     PLAN_AMOUNTS[plan.toLowerCase()],
+          status:     'pending',
+        },
+      });
+    }
 
-        // ── Email YOU with the proof ───────────────────────────────────────────────
-        const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, '');
-        const screenshotBuffer = Buffer.from(base64Data, 'base64');
-        const submittedAt = new Date().toLocaleString('en-NG', { timeZone: 'Africa/Lagos' });
+    // ── Email YOU with the proof ───────────────────────────────────────────────
+    const base64Data      = screenshotBase64.replace(/^data:image\/\w+;base64,/, '');
+    const screenshotBuffer = Buffer.from(base64Data, 'base64');
+    const submittedAt     = new Date().toLocaleString('en-NG', { timeZone: 'Africa/Lagos' });
 
-        await transporter.sendMail({
-            from: `"Apex HMS Payments" <${process.env.EMAIL_USER}>`,
-            to: process.env.NOTIFY_EMAIL || 'georgechiamaka02@gmail.com',
-            subject: `💰 Payment Proof — ${plan} Plan | ${hospital}`,
-            html: `
+    await transporter.sendMail({
+      from:    `"Apex HMS Payments" <${process.env.EMAIL_USER}>`,
+      to:      process.env.NOTIFY_EMAIL || 'georgechiamaka02@gmail.com',
+      subject: `💰 Payment Proof — ${plan} Plan | ${hospital}`,
+      html: `
         <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1e293b;">
           <div style="background:linear-gradient(135deg,#4f46e5,#3b82f6);padding:32px;border-radius:16px 16px 0 0;text-align:center;">
             <h1 style="color:white;margin:0;font-size:24px;">💰 New Payment Proof</h1>
@@ -137,19 +137,19 @@ router.post('/proof', async (req, res) => {
           </div>
         </div>
       `,
-            attachments: [{
-                filename: screenshotName || 'payment_screenshot.png',
-                content: screenshotBuffer,
-                contentType: 'image/png',
-            }],
-        });
+      attachments: [{
+        filename:    screenshotName || 'payment_screenshot.png',
+        content:     screenshotBuffer,
+        contentType: 'image/png',
+      }],
+    });
 
-        // ── Confirmation email to the hospital ────────────────────────────────────
-        await transporter.sendMail({
-            from: `"Apex HMS" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: `✅ Payment Proof Received — ${plan} Plan`,
-            html: `
+    // ── Confirmation email to the hospital ────────────────────────────────────
+    await transporter.sendMail({
+      from:    `"Apex HMS" <${process.env.EMAIL_USER}>`,
+      to:      email,
+      subject: `✅ Payment Proof Received — ${plan} Plan`,
+      html: `
         <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1e293b;">
           <div style="background:linear-gradient(135deg,#4f46e5,#3b82f6);padding:32px;border-radius:16px 16px 0 0;text-align:center;">
             <h1 style="color:white;margin:0;">✅ Payment Proof Received</h1>
@@ -169,14 +169,14 @@ router.post('/proof', async (req, res) => {
           </div>
         </div>
       `,
-        });
+    });
 
-        return res.json({ message: 'Payment proof submitted. You will be notified within 24 hours.' });
+    return res.json({ message: 'Payment proof submitted. You will be notified within 24 hours.' });
 
-    } catch (err) {
-        console.error('[POST /subscriptions/proof]', err);
-        return res.status(500).json({ error: 'Failed to submit payment proof. Please try again.' });
-    }
+  } catch (err) {
+    console.error('[POST /subscriptions/proof]', err);
+    return res.status(500).json({ error: 'Failed to submit payment proof. Please try again.' });
+  }
 });
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -184,21 +184,21 @@ router.post('/proof', async (req, res) => {
    Super admin views all pending payment proofs.
 ───────────────────────────────────────────────────────────────────────────── */
 router.get('/pending', verifyToken, isSuperAdmin, async (req, res) => {
-    try {
-        const pending = await prisma.subscription.findMany({
-            where: { status: 'pending' },
-            include: {
-                hospital: {
-                    select: { id: true, hospitalName: true, email: true, adminName: true, phone: true },
-                },
-            },
-            orderBy: { createdAt: 'desc' },
-        });
-        return res.json({ subscriptions: pending });
-    } catch (err) {
-        console.error('[GET /subscriptions/pending]', err);
-        return res.status(500).json({ error: 'Failed to fetch pending subscriptions.' });
-    }
+  try {
+    const pending = await prisma.subscription.findMany({
+      where: { status: 'pending' },
+      include: {
+        hospital: {
+          select: { id: true, hospitalName: true, email: true, adminName: true, phone: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json({ subscriptions: pending });
+  } catch (err) {
+    console.error('[GET /subscriptions/pending]', err);
+    return res.status(500).json({ error: 'Failed to fetch pending subscriptions.' });
+  }
 });
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -207,33 +207,33 @@ router.get('/pending', verifyToken, isSuperAdmin, async (req, res) => {
    Also sends activation email to the hospital.
 ───────────────────────────────────────────────────────────────────────────── */
 router.patch('/:hospitalId/activate', verifyToken, isSuperAdmin, async (req, res) => {
-    try {
-        const hospitalId = parseInt(req.params.hospitalId);
-        const { months = 1 } = req.body; // how many months to activate (default 1)
+  try {
+    const hospitalId = parseInt(req.params.hospitalId);
+    const { months = 1 } = req.body; // how many months to activate (default 1)
 
-        const activatedAt = new Date();
-        const expiresAt = new Date(activatedAt);
-        expiresAt.setMonth(expiresAt.getMonth() + months);
+    const activatedAt = new Date();
+    const expiresAt   = new Date(activatedAt);
+    expiresAt.setMonth(expiresAt.getMonth() + months);
 
-        const subscription = await prisma.subscription.update({
-            where: { hospitalId },
-            data: {
-                status: 'active',
-                activatedAt,
-                expiresAt,
-                activatedBy: req.user.id,
-            },
-            include: {
-                hospital: { select: { hospitalName: true, email: true, adminName: true } },
-            },
-        });
+    const subscription = await prisma.subscription.update({
+      where:  { hospitalId },
+      data:   {
+        status:      'active',
+        activatedAt,
+        expiresAt,
+        activatedBy: req.user.id,
+      },
+      include: {
+        hospital: { select: { hospitalName: true, email: true, adminName: true } },
+      },
+    });
 
-        // Send activation email to hospital
-        await transporter.sendMail({
-            from: `"Apex HMS" <${process.env.EMAIL_USER}>`,
-            to: subscription.hospital.email,
-            subject: `🎉 Your Hospital Account is Now Active — Apex HMS`,
-            html: `
+    // Send activation email to hospital
+    await transporter.sendMail({
+      from:    `"Apex HMS" <${process.env.EMAIL_USER}>`,
+      to:      subscription.hospital.email,
+      subject: `🎉 Your Hospital Account is Now Active — Apex HMS`,
+      html: `
         <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1e293b;">
           <div style="background:linear-gradient(135deg,#16a34a,#15803d);padding:32px;border-radius:16px 16px 0 0;text-align:center;">
             <h1 style="color:white;margin:0;">🎉 You're All Set!</h1>
@@ -261,17 +261,17 @@ router.patch('/:hospitalId/activate', verifyToken, isSuperAdmin, async (req, res
           </div>
         </div>
       `,
-        });
+    });
 
-        return res.json({
-            message: `Subscription activated for ${subscription.hospital.hospitalName}.`,
-            subscription,
-        });
+    return res.json({
+      message: `Subscription activated for ${subscription.hospital.hospitalName}.`,
+      subscription,
+    });
 
-    } catch (err) {
-        console.error('[PATCH /subscriptions/:hospitalId/activate]', err);
-        return res.status(500).json({ error: 'Failed to activate subscription.' });
-    }
+  } catch (err) {
+    console.error('[PATCH /subscriptions/:hospitalId/activate]', err);
+    return res.status(500).json({ error: 'Failed to activate subscription.' });
+  }
 });
 
 module.exports = router;
