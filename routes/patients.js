@@ -26,7 +26,7 @@ async function withRetry(fn, retries = 3, delayMs = 2000) {
 
       if (isConnectionErr && attempt < retries) {
         console.warn(`[patients] DB connection error, retrying (${attempt}/${retries})...`);
-        try { await prisma.$queryRaw`SELECT 1`; } catch (_) {}
+        try { await prisma.$queryRaw`SELECT 1`; } catch (_) { }
         await new Promise(res => setTimeout(res, delayMs));
       } else {
         throw err;
@@ -60,7 +60,7 @@ router.post('/login', async (req, res) => {
 
     return res.json({
       token,
-      user: { id: patient.id, fullName: patient.fullName, email: patient.email, patientNumber: patient.patientNumber, role: 'patient' },
+      user: { id: patient.id, fullName: patient.fullName, email: patient.email, patientNumber: patient.patientNumber, role: 'patient', hospital_id: patient.hospitalId },
     });
   } catch (err) {
     console.error('[POST /patients/login]', err);
@@ -104,7 +104,9 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       select: { hospitalName: true },
     }));
 
-    const tempPassword = generateTempPassword();
+
+const tempPassword = generateTempPassword();
+    console.log('Generated tempPassword:', tempPassword); // ← add this
     const passwordHash = await bcrypt.hash(tempPassword, 12);
     const patientNumber = generatePatientNumber();
 
@@ -143,7 +145,7 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       }).catch(err => console.error('[Email] Failed to send patient credentials:', err.message));
     }
 
-    return res.status(201).json({ message: 'Patient registered successfully', patient });
+    return res.status(201).json({ message: 'Patient registered successfully', patient, tempPassword });
   } catch (err) {
     console.error('[POST /patients]', err);
     if (err.code === 'P2002') return res.status(409).json({ error: 'A patient with this email already exists' });
@@ -162,9 +164,9 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
         hospitalId,
         ...(search && {
           OR: [
-            { fullName:      { contains: search, mode: 'insensitive' } },
+            { fullName: { contains: search, mode: 'insensitive' } },
             { patientNumber: { contains: search, mode: 'insensitive' } },
-            { email:         { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
           ],
         }),
       },
