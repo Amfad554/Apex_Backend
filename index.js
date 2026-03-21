@@ -61,6 +61,7 @@ app.use('/api/subscriptions', subscriptionRoutes);
 
 app.use('/api/contact',  contactRoutes);
 app.use('/api/platform', platformStatsRoutes);
+app.use('/api/notifications', require('./routes/notifications'));
 
 // 404 handler
 app.use((req, res) => {

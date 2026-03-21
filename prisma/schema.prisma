@@ -179,6 +179,20 @@ model MedicalRecord {
   @@map("medical_records")
 }
 
+model Notification {
+  id            Int       @id @default(autoincrement())
+  hospitalId    Int?      @map("hospital_id")
+  recipientId   Int?      @map("recipient_id")
+  recipientRole String?   @map("recipient_role")
+  type          String
+  title         String
+  message       String
+  link          String?
+  read          Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  @@map("notifications")
+}
+
 enum HospitalType {
   public
   private
