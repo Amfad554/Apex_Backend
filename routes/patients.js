@@ -107,6 +107,11 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       return res.status(400).json({ error: 'fullName, dateOfBirth, phone and address are required' });
     }
 
+    const parsedDob = new Date(dateOfBirth);
+    if (isNaN(parsedDob.getTime())) {
+      return res.status(400).json({ error: 'Invalid dateOfBirth format' });
+    }
+
     const hospital = await withRetry(() => prisma.hospital.findUnique({
       where: { id: hospitalId },
       select: { hospitalName: true },
@@ -121,7 +126,7 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
         hospitalId,
         patientNumber,
         fullName:          fullName.trim(),
-        dateOfBirth:       new Date(dateOfBirth),
+        dateOfBirth:       parsedDob,
         gender:            gender || 'male',
         phone,
         email:             email ? email.toLowerCase().trim() : null,
@@ -178,11 +183,16 @@ router.put('/:id', verifyToken, isHospitalAdmin, async (req, res) => {
       return res.status(400).json({ error: 'fullName, dateOfBirth, phone and address are required' });
     }
 
+    const parsedDob = new Date(dateOfBirth);
+    if (isNaN(parsedDob.getTime())) {
+      return res.status(400).json({ error: 'Invalid dateOfBirth format' });
+    }
+
     const patient = await withRetry(() => prisma.patient.update({
       where: { id },
       data: {
         fullName:          fullName.trim(),
-        dateOfBirth:       new Date(dateOfBirth),
+        dateOfBirth:       parsedDob,
         gender:            gender            || existing.gender,
         phone,
         email:             email ? email.toLowerCase().trim() : null,
