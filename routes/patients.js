@@ -1,6 +1,6 @@
 const express = require('express');
-const router = express.Router();
-const bcrypt = require('bcryptjs');
+const router  = express.Router();
+const bcrypt  = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const { verifyToken, isHospitalAdmin, belongsToHospital } = require('../middleware/authMiddleware');
 const { sendPatientCredentials } = require('../lib/mailer');
@@ -10,6 +10,31 @@ const prisma = new PrismaClient();
 const generateTempPassword  = () => Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
 const generatePatientNumber = () => 'PAT-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
 
+// ── Transform Prisma camelCase → snake_case for the frontend ──────────────────
+const toSnake = (p) => !p ? null : {
+  id:                 p.id,
+  patient_number:     p.patientNumber,
+  full_name:          p.fullName,
+  date_of_birth:      p.dateOfBirth,
+  gender:             p.gender,
+  phone:              p.phone,
+  email:              p.email,
+  address:            p.address,
+  blood_group:        p.bloodGroup,
+  medical_conditions: p.medicalConditions,
+  next_of_kin_name:   p.nextOfKinName,
+  next_of_kin_phone:  p.nextOfKinPhone,
+  created_at:         p.createdAt,
+};
+
+// Prisma select block reused across all queries
+const PATIENT_SELECT = {
+  id: true, patientNumber: true, fullName: true, dateOfBirth: true,
+  gender: true, phone: true, email: true, address: true,
+  bloodGroup: true, medicalConditions: true,
+  nextOfKinName: true, nextOfKinPhone: true, createdAt: true,
+};
+
 // ── Retry wrapper for Neon sleep timeouts ─────────────────────────────────────
 async function withRetry(fn, retries = 3, delayMs = 2000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -17,8 +42,8 @@ async function withRetry(fn, retries = 3, delayMs = 2000) {
       return await fn();
     } catch (err) {
       const isConnectionErr =
-        err.message?.includes('connect') ||
-        err.message?.includes('timeout') ||
+        err.message?.includes('connect')           ||
+        err.message?.includes('timeout')           ||
         err.message?.includes('Server has closed') ||
         err.errorCode === 'P1001' ||
         err.errorCode === 'P1008' ||
@@ -50,7 +75,7 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, patient.passwordHash);
     if (!valid) return res.status(401).json({ message: 'Invalid credentials' });
 
-    const jwt = require('jsonwebtoken');
+    const jwt   = require('jsonwebtoken');
     const token = jwt.sign(
       { id: patient.id, role: 'patient', hospital_id: patient.hospitalId },
       process.env.JWT_SECRET,
@@ -60,12 +85,12 @@ router.post('/login', async (req, res) => {
     return res.json({
       token,
       user: {
-        id: patient.id,
-        fullName: patient.fullName,
-        email: patient.email,
+        id:            patient.id,
+        fullName:      patient.fullName,
+        email:         patient.email,
         patientNumber: patient.patientNumber,
-        role: 'patient',
-        hospital_id: patient.hospitalId,
+        role:          'patient',
+        hospital_id:   patient.hospitalId,
       },
     });
   } catch (err) {
@@ -78,16 +103,11 @@ router.post('/login', async (req, res) => {
 router.get('/detail/:id', verifyToken, async (req, res) => {
   try {
     const patient = await withRetry(() => prisma.patient.findUnique({
-      where: { id: parseInt(req.params.id) },
-      select: {
-        id: true, patientNumber: true, fullName: true, dateOfBirth: true,
-        gender: true, phone: true, email: true, address: true,
-        bloodGroup: true, medicalConditions: true,
-        nextOfKinName: true, nextOfKinPhone: true, createdAt: true,
-      },
+      where:  { id: parseInt(req.params.id) },
+      select: PATIENT_SELECT,
     }));
     if (!patient) return res.status(404).json({ error: 'Patient not found' });
-    return res.json({ patient });
+    return res.json({ patient: toSnake(patient) });
   } catch (err) {
     console.error('[GET /patients/detail]', err);
     return res.status(500).json({ error: 'Failed to fetch patient' });
@@ -101,6 +121,7 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       fullName, dateOfBirth, gender, phone, email, address,
       bloodGroup, medicalConditions, nextOfKinName, nextOfKinPhone,
     } = req.body;
+
     const hospitalId = req.user.hospital_id;
 
     if (!fullName || !dateOfBirth || !phone || !address) {
@@ -113,7 +134,7 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
     }
 
     const hospital = await withRetry(() => prisma.hospital.findUnique({
-      where: { id: hospitalId },
+      where:  { id: hospitalId },
       select: { hospitalName: true },
     }));
 
@@ -137,12 +158,7 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
         nextOfKinPhone:    nextOfKinPhone    || null,
         passwordHash,
       },
-      select: {
-        id: true, patientNumber: true, fullName: true, dateOfBirth: true,
-        gender: true, phone: true, email: true, address: true,
-        bloodGroup: true, medicalConditions: true,
-        nextOfKinName: true, nextOfKinPhone: true, createdAt: true,
-      },
+      select: PATIENT_SELECT,
     }));
 
     if (email) {
@@ -156,7 +172,11 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       }).catch(err => console.error('[Email] Failed to send patient credentials:', err.message));
     }
 
-    return res.status(201).json({ message: 'Patient registered successfully', patient, tempPassword });
+    return res.status(201).json({
+      message:      'Patient registered successfully',
+      patient:      toSnake(patient),
+      tempPassword,
+    });
   } catch (err) {
     console.error('[POST /patients]', err);
     if (err.code === 'P2002') return res.status(409).json({ error: 'A patient with this email already exists' });
@@ -170,7 +190,6 @@ router.put('/:id', verifyToken, isHospitalAdmin, async (req, res) => {
     const id         = parseInt(req.params.id);
     const hospitalId = req.user.hospital_id;
 
-    // Ensure the patient belongs to this hospital
     const existing = await withRetry(() => prisma.patient.findFirst({ where: { id, hospitalId } }));
     if (!existing) return res.status(404).json({ error: 'Patient not found' });
 
@@ -193,7 +212,7 @@ router.put('/:id', verifyToken, isHospitalAdmin, async (req, res) => {
       data: {
         fullName:          fullName.trim(),
         dateOfBirth:       parsedDob,
-        gender:            gender            || existing.gender,
+        gender:            gender         || existing.gender,
         phone,
         email:             email ? email.toLowerCase().trim() : null,
         address,
@@ -202,15 +221,10 @@ router.put('/:id', verifyToken, isHospitalAdmin, async (req, res) => {
         nextOfKinName:     nextOfKinName     || null,
         nextOfKinPhone:    nextOfKinPhone    || null,
       },
-      select: {
-        id: true, patientNumber: true, fullName: true, dateOfBirth: true,
-        gender: true, phone: true, email: true, address: true,
-        bloodGroup: true, medicalConditions: true,
-        nextOfKinName: true, nextOfKinPhone: true, createdAt: true,
-      },
+      select: PATIENT_SELECT,
     }));
 
-    return res.json({ message: 'Patient updated successfully', patient });
+    return res.json({ message: 'Patient updated successfully', patient: toSnake(patient) });
   } catch (err) {
     console.error('[PUT /patients/:id]', err);
     if (err.code === 'P2002') return res.status(409).json({ error: 'A patient with this email already exists' });
@@ -235,17 +249,12 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
           ],
         }),
       },
-      select: {
-        id: true, patientNumber: true, fullName: true, dateOfBirth: true,
-        gender: true, phone: true, email: true, address: true,
-        bloodGroup: true, medicalConditions: true,
-        nextOfKinName: true, nextOfKinPhone: true, createdAt: true,
-      },
+      select:  PATIENT_SELECT,
       orderBy: { createdAt: 'desc' },
       ...(limit && { take: parseInt(limit) }),
     }));
 
-    return res.json({ patients });
+    return res.json({ patients: patients.map(toSnake) });
   } catch (err) {
     console.error('[GET /patients]', err);
     return res.status(500).json({ error: 'Failed to fetch patients' });
