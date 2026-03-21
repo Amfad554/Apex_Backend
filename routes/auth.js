@@ -2,17 +2,21 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const rateLimit = require('express-rate-limit');
+const { sendEmail } = require('../lib/mailer');
 
-// ─── Rate limiter (brute-force protection) ────────────────────────────────────
+// ─── Rate limiters ────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000, max: 10,
+  standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+});
+
+const forgotLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 5,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many reset requests. Please try again in 1 hour.' },
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -35,13 +39,11 @@ router.post('/hospital/register', async (req, res) => {
     if (!licenseNumber?.trim()) missing.push('licenseNumber');
     if (!adminName?.trim()) missing.push('adminName');
     if (!password) missing.push('password');
-
     if (missing.length)
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
 
     if (!validateEmail(email))
       return res.status(400).json({ error: 'Invalid email address.' });
-
     if (password.length < 8)
       return res.status(400).json({ error: 'Password must be at least 8 characters.' });
 
@@ -49,7 +51,7 @@ router.post('/hospital/register', async (req, res) => {
     if (!validTypes.includes(hospitalType.toLowerCase()))
       return res.status(400).json({ error: `hospitalType must be one of: ${validTypes.join(', ')}` });
 
-    const existing = await prisma.Hospital.findFirst({
+    const existing = await prisma.hospital.findFirst({
       where: { OR: [{ email: email.toLowerCase().trim() }, { licenseNumber: licenseNumber.trim() }] },
     });
     if (existing) {
@@ -58,8 +60,7 @@ router.post('/hospital/register', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-
-    await prisma.Hospital.create({
+    await prisma.hospital.create({
       data: {
         hospitalName: hospitalName.trim(),
         hospitalType: hospitalType.toLowerCase(),
@@ -86,36 +87,26 @@ router.post('/hospital/register', async (req, res) => {
 router.post('/hospital/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password)
       return res.status(400).json({ error: 'Email and password are required.' });
 
-    const hospital = await prisma.Hospital.findUnique({
+    const hospital = await prisma.hospital.findUnique({
       where: { email: email.toLowerCase().trim() },
-      include: {
-        subscription: {
-          select: { status: true, plan: true, expiresAt: true },
-        },
-      },
+      include: { subscription: { select: { status: true, plan: true, expiresAt: true } } },
     });
 
-    if (!hospital)
-      return res.status(401).json({ error: 'Invalid email or password.' });
+    if (!hospital) return res.status(401).json({ error: 'Invalid email or password.' });
 
     if (hospital.status === 'pending')
-      return res.status(403).json({ error: 'Your account is pending approval. Please wait for the admin to verify your hospital.' });
-
+      return res.status(403).json({ error: 'Your account is pending approval.' });
     if (hospital.status === 'suspended')
       return res.status(403).json({ error: 'This account has been suspended. Contact support.' });
-
     if (hospital.status === 'rejected')
       return res.status(403).json({ error: 'This hospital registration was rejected. Contact support.' });
 
     const isMatch = await bcrypt.compare(password, hospital.passwordHash);
-    if (!isMatch)
-      return res.status(401).json({ error: 'Invalid email or password.' });
+    if (!isMatch) return res.status(401).json({ error: 'Invalid email or password.' });
 
-    // ── Subscription check ───────────────────────────────────────────────────
     const sub = hospital.subscription;
     const isActive = sub && sub.status === 'active' && (!sub.expiresAt || new Date(sub.expiresAt) > new Date());
 
@@ -128,8 +119,8 @@ router.post('/hospital/login', loginLimiter, async (req, res) => {
     return res.json({
       message: 'Login successful',
       token,
-      subscriptionStatus: sub?.status || 'none',  // 'none' | 'pending' | 'active' | 'expired'
-      requiresPayment: !isActive,                  // true if they must pay before using dashboard
+      subscriptionStatus: sub?.status || 'none',
+      requiresPayment: !isActive,
       user: {
         id: hospital.id,
         name: hospital.hospitalName,
@@ -145,22 +136,110 @@ router.post('/hospital/login', loginLimiter, async (req, res) => {
   }
 });
 
+// ─── POST /api/auth/hospital/forgot-password ──────────────────────────────────
+router.post('/hospital/forgot-password', forgotLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required.' });
+
+    const hospital = await prisma.hospital.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: { id: true, hospitalName: true, email: true },
+    });
+
+    // Always return 200 — never reveal whether the email exists
+    if (!hospital) {
+      return res.json({ message: 'If this email is registered, a reset code has been sent.' });
+    }
+
+    // 6-digit code, expires in 15 minutes
+    const code      = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const codeHash  = await bcrypt.hash(code, 10);
+
+    await prisma.hospital.update({
+      where: { id: hospital.id },
+      data:  { resetCodeHash: codeHash, resetCodeExpiry: expiresAt },
+    });
+
+    await sendEmail({
+      to:      hospital.email,
+      subject: 'Your Password Reset Code',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
+          <h2 style="color:#0A1A3F;margin-bottom:8px;">Password Reset Request</h2>
+          <p style="color:#374151;margin-bottom:24px;">
+            Hi <strong>${hospital.hospitalName}</strong>, here is your 6-digit reset code.
+            It expires in <strong>15 minutes</strong>.
+          </p>
+          <div style="background:#F5F7FA;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+            <span style="font-size:40px;font-weight:900;letter-spacing:14px;color:#FF5A1F;">${code}</span>
+          </div>
+          <p style="color:#6B7280;font-size:13px;">
+            If you didn't request this, you can safely ignore this email.
+          </p>
+        </div>
+      `,
+    });
+
+    return res.json({ message: 'If this email is registered, a reset code has been sent.' });
+  } catch (err) {
+    console.error('[POST /auth/hospital/forgot-password]', err);
+    return res.status(500).json({ message: 'Failed to process request.' });
+  }
+});
+
+// ─── POST /api/auth/hospital/reset-password ───────────────────────────────────
+router.post('/hospital/reset-password', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+
+    if (!email || !code || !newPassword)
+      return res.status(400).json({ message: 'Email, code and newPassword are required.' });
+    if (newPassword.length < 8)
+      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+
+    const hospital = await prisma.hospital.findUnique({
+      where:  { email: email.toLowerCase().trim() },
+      select: { id: true, resetCodeHash: true, resetCodeExpiry: true },
+    });
+
+    if (!hospital || !hospital.resetCodeHash || !hospital.resetCodeExpiry)
+      return res.status(400).json({ message: 'Invalid or expired reset code.' });
+
+    if (new Date() > new Date(hospital.resetCodeExpiry))
+      return res.status(400).json({ message: 'Reset code has expired. Please request a new one.' });
+
+    const codeMatch = await bcrypt.compare(code, hospital.resetCodeHash);
+    if (!codeMatch)
+      return res.status(400).json({ message: 'Invalid reset code.' });
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.hospital.update({
+      where: { id: hospital.id },
+      data:  { passwordHash, resetCodeHash: null, resetCodeExpiry: null },
+    });
+
+    return res.json({ message: 'Password reset successfully.' });
+  } catch (err) {
+    console.error('[POST /auth/hospital/reset-password]', err);
+    return res.status(500).json({ message: 'Failed to reset password.' });
+  }
+});
+
 // ─── POST /api/auth/admin/login ───────────────────────────────────────────────
 router.post('/admin/login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
-
     if (!username || !password)
       return res.status(400).json({ error: 'Username and password are required.' });
 
     const admin = await prisma.superAdmin.findUnique({ where: { username } });
-
-    if (!admin)
-      return res.status(401).json({ error: 'Invalid credentials.' });
+    if (!admin) return res.status(401).json({ error: 'Invalid credentials.' });
 
     const isMatch = await bcrypt.compare(password, admin.passwordHash);
-    if (!isMatch)
-      return res.status(401).json({ error: 'Invalid credentials.' });
+    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials.' });
 
     const token = jwt.sign(
       { id: admin.id, role: 'super_admin' },
@@ -183,26 +262,19 @@ router.post('/admin/login', loginLimiter, async (req, res) => {
 router.post('/staff/login', loginLimiter, async (req, res) => {
   try {
     const { identifier, password, hospitalId } = req.body;
-
     if (!identifier || !password || !hospitalId)
       return res.status(400).json({ error: 'identifier, password, and hospitalId are required.' });
 
     const staff = await prisma.hospitalStaff.findFirst({
-      where: {
-        hospitalId: parseInt(hospitalId),
-        email: identifier.toLowerCase().trim(),
-      },
+      where: { hospitalId: parseInt(hospitalId), email: identifier.toLowerCase().trim() },
     });
 
-    if (!staff)
-      return res.status(401).json({ error: 'Invalid credentials.' });
-
+    if (!staff) return res.status(401).json({ error: 'Invalid credentials.' });
     if (staff.status === 'inactive')
       return res.status(403).json({ error: 'Your account is inactive. Contact your hospital admin.' });
 
     const isMatch = await bcrypt.compare(password, staff.passwordHash);
-    if (!isMatch)
-      return res.status(401).json({ error: 'Invalid credentials.' });
+    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials.' });
 
     const token = jwt.sign(
       { id: staff.id, hospital_id: staff.hospitalId, role: staff.role },
@@ -214,13 +286,9 @@ router.post('/staff/login', loginLimiter, async (req, res) => {
       message: 'Login successful',
       token,
       user: {
-        id: staff.id,
-        fullName: staff.fullName,
-        email: staff.email,
-        role: staff.role,
-        department: staff.department,
-        specialty: staff.specialty,
-        hospitalId: staff.hospitalId,
+        id: staff.id, fullName: staff.fullName, email: staff.email,
+        role: staff.role, department: staff.department,
+        specialty: staff.specialty, hospitalId: staff.hospitalId,
       },
     });
   } catch (err) {
@@ -234,7 +302,7 @@ router.post('/staff/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required.' });
-    console.log(`[Forgot password requested for: ${email}]`);
+    console.log(`[Forgot password requested for staff: ${email}]`);
     return res.json({ message: 'If this email exists, a reset link has been sent.' });
   } catch (err) {
     console.error('[POST /auth/staff/forgot-password]', err);

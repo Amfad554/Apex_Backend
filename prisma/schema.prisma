@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model SuperAdmin {
@@ -18,26 +18,28 @@ model SuperAdmin {
 }
 
 model Hospital {
-  id             Int             @id @default(autoincrement())
-  hospitalName   String          @map("hospital_name")
-  hospitalType   HospitalType    @map("hospital_type")
-  address        String
-  phone          String
-  email          String          @unique
-  licenseNumber  String          @unique @map("license_number")
-  adminName      String          @map("admin_name")
-  passwordHash   String          @map("password_hash")
-  status         HospitalStatus  @default(pending)
-  createdAt      DateTime        @default(now()) @map("created_at")
-  approvedAt     DateTime?       @map("approved_at")
-  approvedBy     Int?            @map("approved_by")
-  subscription   Subscription?
-  appointments   Appointment[]
-  staff          HospitalStaff[]
-  approver       SuperAdmin?     @relation("AdminApproval", fields: [approvedBy], references: [id])
-  medicalRecords MedicalRecord[]
-  patients       Patient[]
-  prescriptions  Prescription[]
+  id              Int             @id @default(autoincrement())
+  hospitalName    String          @map("hospital_name")
+  hospitalType    HospitalType    @map("hospital_type")
+  address         String
+  phone           String
+  email           String          @unique
+  licenseNumber   String          @unique @map("license_number")
+  adminName       String          @map("admin_name")
+  passwordHash    String          @map("password_hash")
+  status          HospitalStatus  @default(pending)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  approvedAt      DateTime?       @map("approved_at")
+  approvedBy      Int?            @map("approved_by")
+  subscription    Subscription?
+  appointments    Appointment[]
+  staff           HospitalStaff[]
+  approver        SuperAdmin?     @relation("AdminApproval", fields: [approvedBy], references: [id])
+  medicalRecords  MedicalRecord[]
+  patients        Patient[]
+  prescriptions   Prescription[]
+  resetCodeHash   String?         @map("reset_code_hash")
+  resetCodeExpiry DateTime?       @map("reset_code_expiry")
 
   @@index([status])
   @@index([email])
