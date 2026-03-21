@@ -6,6 +6,7 @@ const prisma = require('../lib/prisma');
 const rateLimit = require('express-rate-limit');
 const { sendEmail } = require('../lib/mailer');
 
+const { verifyToken } = require('../middleware/authMiddleware');
 // ─── Rate limiters ────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 10,
