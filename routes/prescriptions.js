@@ -84,6 +84,19 @@ router.post(
         },
       });
 
+      // ── Notify hospital about new prescription ──────────────────────────────
+      prisma.notification.create({
+        data: {
+          hospitalId,
+          recipientId: null,
+          recipientRole: null,
+          type: 'prescription_issued',
+          title: 'Prescription Issued',
+          message: `Dr. ${prescription.doctor.fullName} issued ${medication.trim()} for ${prescription.patient.fullName}.`,
+          link: 'prescriptions',
+        },
+      }).catch(err => console.error('[Notification] prescription_issued:', err.message));
+
       return res.status(201).json({ message: 'Prescription issued successfully.', prescription });
     } catch (err) {
       console.error('[POST /prescriptions]', err);

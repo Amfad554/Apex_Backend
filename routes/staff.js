@@ -113,6 +113,19 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       },
     }));
 
+    // ── Notify hospital about new staff ───────────────────────────────────────
+    prisma.notification.create({
+      data: {
+        hospitalId,
+        recipientId: null,
+        recipientRole: null,
+        type: 'staff_added',
+        title: 'New Staff Member Added',
+        message: `${fullName.trim()} has been added as a ${role}.`,
+        link: 'staff',
+      },
+    }).catch(err => console.error('[Notification] staff_added:', err.message));
+
     sendStaffCredentials({
       to: email,
       fullName: fullName.trim(),

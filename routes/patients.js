@@ -104,9 +104,8 @@ router.post('/', verifyToken, isHospitalAdmin, async (req, res) => {
       select: { hospitalName: true },
     }));
 
-
-const tempPassword = generateTempPassword();
-    console.log('Generated tempPassword:', tempPassword); // ← add this
+    const tempPassword = generateTempPassword();
+    console.log('Generated tempPassword:', tempPassword);
     const passwordHash = await bcrypt.hash(tempPassword, 12);
     const patientNumber = generatePatientNumber();
 
@@ -133,6 +132,19 @@ const tempPassword = generateTempPassword();
         nextOfKinName: true, nextOfKinPhone: true, createdAt: true,
       },
     }));
+
+    // ── Notify hospital about new patient ─────────────────────────────────────
+    prisma.notification.create({
+      data: {
+        hospitalId,
+        recipientId: null,
+        recipientRole: null,
+        type: 'patient_registered',
+        title: 'New Patient Registered',
+        message: `${fullName.trim()} (${patientNumber}) has been registered.`,
+        link: 'patients',
+      },
+    }).catch(err => console.error('[Notification] patient_registered:', err.message));
 
     if (email) {
       sendPatientCredentials({

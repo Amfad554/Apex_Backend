@@ -105,6 +105,19 @@ router.post('/', verifyToken, async (req, res) => {
       },
     });
 
+    // ── Notify hospital about new appointment ─────────────────────────────────
+    prisma.notification.create({
+      data: {
+        hospitalId,
+        recipientId: null,
+        recipientRole: null,
+        type: 'appointment_booked',
+        title: 'Appointment Booked',
+        message: `${appointment.patient.fullName} has an appointment with Dr. ${appointment.doctor.fullName} on ${new Date(apptDate).toLocaleDateString()}.`,
+        link: 'appointments',
+      },
+    }).catch(err => console.error('[Notification] appointment_booked:', err.message));
+
     return res.status(201).json({ message: 'Appointment booked successfully.', appointment });
   } catch (err) {
     console.error('[POST /appointments]', err);
