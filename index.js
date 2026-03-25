@@ -20,7 +20,7 @@ const billingRoutes = require('./routes/Billing');
 const admissionRoutes = require('./routes/Admissions');
 const bedRoutes = require('./routes/Beds');
 const queueRoutes = require('./routes/Queue');
-const labRequestRoutes = require('./routes/LabRequests');
+const labRequestRoutes = require('./routes/Labrequests');
 
 const contactRoutes = require('./routes/contact');
 const platformStatsRoutes = require('./routes/platformStats');
