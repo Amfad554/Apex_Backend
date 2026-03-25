@@ -16,6 +16,15 @@ const appointmentRoutes = require('./routes/appointments');
 const prescriptionRoutes = require('./routes/prescriptions');
 const medicalRecordRoutes = require('./routes/medicalRecords');
 const staffPatientAuthRoutes = require('./routes/Staffpatientauth'); // ← separate file, not staff again
+const billingRoutes = require('./routes/billing');
+const admissionRoutes = require('./routes/admissions');
+const bedRoutes = require('./routes/beds');
+const queueRoutes = require('./routes/queue');
+const labRequestRoutes = require('./routes/labRequests');
+
+const contactRoutes = require('./routes/contact');
+const platformStatsRoutes = require('./routes/platformStats');
+const subscriptionRoutes = require('./routes/Subscriptionroutes');
 
 // Initialize Express app
 const app = express();
@@ -52,26 +61,15 @@ app.use('/api/staff', staffRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/medical-records', medicalRecordRoutes);
-app.use('/api/billing',      billingRoutes);
-app.use('/api/admissions',   admissionRoutes);
-app.use('/api/beds',         bedRoutes);
-app.use('/api/queue',        queueRoutes);
+app.use('/api/billing', billingRoutes);
+app.use('/api/admissions', admissionRoutes);
+app.use('/api/beds', bedRoutes);
+app.use('/api/queue', queueRoutes);
 app.use('/api/lab-requests', labRequestRoutes);
-
-
-const billingRoutes     = require('./routes/billing');
-const admissionRoutes   = require('./routes/admissions');
-const bedRoutes         = require('./routes/beds');
-const queueRoutes       = require('./routes/queue');
-const labRequestRoutes  = require('./routes/labRequests');
-
-const contactRoutes       = require('./routes/contact');
-const platformStatsRoutes = require('./routes/platformStats');
-const subscriptionRoutes = require('./routes/Subscriptionroutes');
 app.use('/api/subscriptions', subscriptionRoutes);
 
 
-app.use('/api/contact',  contactRoutes);
+app.use('/api/contact', contactRoutes);
 app.use('/api/platform', platformStatsRoutes);
 app.use('/api/notifications', require('./routes/notifications'));
 
