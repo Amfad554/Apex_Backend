@@ -16,11 +16,11 @@ const appointmentRoutes = require('./routes/appointments');
 const prescriptionRoutes = require('./routes/prescriptions');
 const medicalRecordRoutes = require('./routes/medicalRecords');
 const staffPatientAuthRoutes = require('./routes/Staffpatientauth'); // ← separate file, not staff again
-const billingRoutes = require('./routes/Billing');
-const admissionRoutes = require('./routes/Admissions');
-const bedRoutes = require('./routes/Beds');
-const queueRoutes = require('./routes/Queue');
-const labRequestRoutes = require('./routes/Labrequests');
+const billingRoutes = require('./routes/billing');
+const admissionRoutes = require('./routes/admissions');
+const bedRoutes = require('./routes/beds');
+const queueRoutes = require('./routes/queue');
+const labRequestRoutes = require('./routes/labrequests');
 
 const contactRoutes = require('./routes/contact');
 const platformStatsRoutes = require('./routes/platformStats');
