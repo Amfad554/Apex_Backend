@@ -52,6 +52,18 @@ app.use('/api/staff', staffRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/medical-records', medicalRecordRoutes);
+app.use('/api/billing',      billingRoutes);
+app.use('/api/admissions',   admissionRoutes);
+app.use('/api/beds',         bedRoutes);
+app.use('/api/queue',        queueRoutes);
+app.use('/api/lab-requests', labRequestRoutes);
+
+
+const billingRoutes     = require('./routes/billing');
+const admissionRoutes   = require('./routes/admissions');
+const bedRoutes         = require('./routes/beds');
+const queueRoutes       = require('./routes/queue');
+const labRequestRoutes  = require('./routes/labRequests');
 
 const contactRoutes       = require('./routes/contact');
 const platformStatsRoutes = require('./routes/platformStats');
