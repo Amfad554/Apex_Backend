@@ -71,7 +71,7 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
-        const { patientId, description, totalAmount, amount, category, dueDate } = req.body;
+        const { patientId, description, totalAmount, amount, category, dueDate, items } = req.body;
 
         // Accept either totalAmount (frontend) or amount (legacy)
         const finalAmount = totalAmount ?? amount;
