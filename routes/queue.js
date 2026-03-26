@@ -34,10 +34,16 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
                 where: {
                     hospitalId,
                     ...(status && { status }),
-                    ...(department && { department: { contains: department, mode: 'insensitive' } }),
+                    ...(department && {
+                        department: { contains: department, mode: 'insensitive' },
+                    }),
                 },
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
+                    // Include doctor relation if it exists in your schema
+                    ...(prisma.queue.fields?.doctorId && {
+                        doctor: { select: { id: true, fullName: true } },
+                    }),
                 },
                 orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
             })
@@ -51,46 +57,74 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
 });
 
 // ── POST /api/queue/:hospitalId ───────────────────────────────────────────────
+// Frontend sends: { patientId, doctorId, priority, reason }
+// Backend schema expects: patientId, department, priority, notes
+// We map: reason → department (fallback 'General') + notes; doctorId stored if schema allows
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
-        const { patientId, department, priority, notes } = req.body;
+        const { patientId, doctorId, priority, reason, department, notes } = req.body;
 
-        if (!patientId || !department) {
-            return res.status(400).json({ error: 'patientId and department are required' });
+        if (!patientId || (!reason && !department)) {
+            return res.status(400).json({ error: 'patientId and reason are required' });
         }
 
-        // Auto-increment queue number for today per department
+        // Map frontend "reason" to backend "department" field
+        // Use reason as both the department label and notes if no separate department given
+        const finalDepartment = department || reason || 'General';
+        const finalNotes      = notes || reason || null;
+
+        // Auto-increment queue number for today
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         const lastEntry = await withRetry(() =>
             prisma.queue.findFirst({
-                where: { hospitalId, department, createdAt: { gte: today } },
+                where:   { hospitalId, createdAt: { gte: today } },
                 orderBy: { queueNumber: 'desc' },
             })
         );
 
         const queueNumber = lastEntry ? lastEntry.queueNumber + 1 : 1;
 
+        // Build create data
+        const data = {
+            hospitalId,
+            patientId:   parseInt(patientId),
+            queueNumber,
+            department:  finalDepartment,
+            priority:    priority || 'normal',
+            notes:       finalNotes,
+            status:      'waiting',
+        };
+
+        // Add doctorId if schema supports it
+        if (doctorId) {
+            try { data.doctorId = parseInt(doctorId); } catch (_) {}
+        }
+
         const entry = await withRetry(() =>
             prisma.queue.create({
-                data: {
-                    hospitalId,
-                    patientId: parseInt(patientId),
-                    queueNumber,
-                    department,
-                    priority: priority || 'normal',
-                    notes: notes || null,
-                    status: 'waiting',
-                },
+                data,
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
                 },
             })
         );
 
-        return res.status(201).json({ message: 'Added to queue successfully', entry });
+        // Attach doctor info manually if we stored doctorId
+        let result = { ...entry, reason: finalNotes };
+        if (doctorId) {
+            try {
+                const doc = await prisma.staff.findUnique({
+                    where:  { id: parseInt(doctorId) },
+                    select: { id: true, fullName: true },
+                });
+                result.doctor = doc;
+            } catch (_) {}
+        }
+
+        return res.status(201).json({ message: 'Added to queue successfully', entry: result });
     } catch (err) {
         console.error('[POST /queue]', err);
         return res.status(500).json({ error: 'Failed to add to queue' });
@@ -106,8 +140,9 @@ router.patch('/:id/status', verifyToken, async (req, res) => {
         if (!status) return res.status(400).json({ error: 'status is required' });
 
         const data = { status };
-        if (status === 'called') data.calledAt = new Date();
-        if (status === 'done' || status === 'serving') data.servedAt = new Date();
+        if (status === 'called')       data.calledAt = new Date();
+        if (status === 'in-progress')  data.servedAt = new Date();
+        if (status === 'completed')    data.servedAt = new Date();
 
         const entry = await withRetry(() =>
             prisma.queue.update({
@@ -124,6 +159,19 @@ router.patch('/:id/status', verifyToken, async (req, res) => {
         console.error('[PATCH /queue/:id/status]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Queue entry not found' });
         return res.status(500).json({ error: 'Failed to update queue status' });
+    }
+});
+
+// ── DELETE /api/queue/:id ─────────────────────────────────────────────────────
+router.delete('/:id', verifyToken, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        await withRetry(() => prisma.queue.delete({ where: { id } }));
+        return res.json({ message: 'Removed from queue' });
+    } catch (err) {
+        console.error('[DELETE /queue/:id]', err);
+        if (err.code === 'P2025') return res.status(404).json({ error: 'Queue entry not found' });
+        return res.status(500).json({ error: 'Failed to remove from queue' });
     }
 });
 

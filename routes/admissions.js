@@ -35,12 +35,19 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
                     hospitalId,
                     ...(status && { status }),
                     ...(search && {
-                        patient: { fullName: { contains: search, mode: 'insensitive' } },
+                        OR: [
+                            { patient: { fullName: { contains: search, mode: 'insensitive' } } },
+                            { reason: { contains: search, mode: 'insensitive' } },
+                        ],
                     }),
                 },
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true, phone: true } },
-                    bed: { select: { id: true, bedNumber: true, ward: true } },
+                    bed:     { select: { id: true, bedNumber: true, ward: true } },
+                    // Include doctor if relation exists in your schema
+                    ...(prisma.admission.fields?.doctorId && {
+                        doctor: { select: { id: true, fullName: true } },
+                    }),
                 },
                 orderBy: { createdAt: 'desc' },
             })
@@ -54,52 +61,80 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
 });
 
 // ── POST /api/admissions/:hospitalId ─────────────────────────────────────────
+// Frontend sends: { patientId, doctorId, bedId, admissionDate, reason, notes }
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
-        const { patientId, bedId, reason, notes } = req.body;
+        const { patientId, bedId, doctorId, admissionDate, reason, notes } = req.body;
 
         if (!patientId || !reason) {
             return res.status(400).json({ error: 'patientId and reason are required' });
         }
 
-        // If a bed is assigned, mark it occupied
+        // Validate and lock the bed
         if (bedId) {
-            const bed = await withRetry(() => prisma.bed.findFirst({ where: { id: parseInt(bedId), hospitalId } }));
+            const bed = await withRetry(() =>
+                prisma.bed.findFirst({ where: { id: parseInt(bedId), hospitalId } })
+            );
             if (!bed) return res.status(404).json({ error: 'Bed not found' });
-            if (bed.status === 'occupied') return res.status(409).json({ error: 'Bed is already occupied' });
+            if (bed.status === 'occupied')
+                return res.status(409).json({ error: 'Bed is already occupied' });
 
-            await withRetry(() => prisma.bed.update({ where: { id: parseInt(bedId) }, data: { status: 'occupied' } }));
+            await withRetry(() =>
+                prisma.bed.update({ where: { id: parseInt(bedId) }, data: { status: 'occupied' } })
+            );
         }
+
+        // Build data object — only include doctorId if the schema supports it
+        const data = {
+            hospitalId,
+            patientId:     parseInt(patientId),
+            bedId:         bedId ? parseInt(bedId) : null,
+            reason,
+            notes:         notes || null,
+            status:        'admitted',
+            admissionDate: admissionDate ? new Date(admissionDate) : new Date(),
+        };
+
+        // Conditionally add doctorId if field exists on the model
+        try {
+            // This will throw if the field doesn't exist in Prisma schema
+            if (doctorId) data.doctorId = parseInt(doctorId);
+        } catch (_) { /* schema doesn't have doctorId — skip silently */ }
 
         const admission = await withRetry(() =>
             prisma.admission.create({
-                data: {
-                    hospitalId,
-                    patientId: parseInt(patientId),
-                    bedId: bedId ? parseInt(bedId) : null,
-                    reason,
-                    notes: notes || null,
-                    status: 'admitted',
-                },
+                data,
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true, phone: true } },
-                    bed: { select: { id: true, bedNumber: true, ward: true } },
+                    bed:     { select: { id: true, bedNumber: true, ward: true } },
                 },
             })
         );
 
+        // Try to attach doctor info if available
+        let result = { ...admission };
+        if (doctorId) {
+            try {
+                const doc = await prisma.staff.findUnique({
+                    where: { id: parseInt(doctorId) },
+                    select: { id: true, fullName: true },
+                });
+                result.doctor = doc;
+            } catch (_) {}
+        }
+
         prisma.notification.create({
             data: {
                 hospitalId,
-                type: 'patient_admitted',
-                title: 'Patient Admitted',
+                type:    'patient_admitted',
+                title:   'Patient Admitted',
                 message: `${admission.patient.fullName} has been admitted.`,
-                link: 'admissions',
+                link:    'admissions',
             },
         }).catch(err => console.error('[Notification] patient_admitted:', err.message));
 
-        return res.status(201).json({ message: 'Patient admitted successfully', admission });
+        return res.status(201).json({ message: 'Patient admitted successfully', admission: result });
     } catch (err) {
         console.error('[POST /admissions]', err);
         return res.status(500).json({ error: 'Failed to create admission' });
@@ -107,16 +142,20 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
 });
 
 // ── PATCH /api/admissions/:id/discharge ──────────────────────────────────────
+// Frontend sends: { dischargeNotes, dischargeDate }
 router.patch('/:id/discharge', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { notes } = req.body;
+        const { dischargeNotes, notes, dischargeDate } = req.body;
+
+        const finalNotes = dischargeNotes || notes;
 
         const existing = await withRetry(() =>
             prisma.admission.findUnique({ where: { id }, include: { bed: true } })
         );
         if (!existing) return res.status(404).json({ error: 'Admission not found' });
-        if (existing.status === 'discharged') return res.status(409).json({ error: 'Patient already discharged' });
+        if (existing.status === 'discharged')
+            return res.status(409).json({ error: 'Patient already discharged' });
 
         // Free the bed
         if (existing.bedId) {
@@ -129,13 +168,13 @@ router.patch('/:id/discharge', verifyToken, async (req, res) => {
             prisma.admission.update({
                 where: { id },
                 data: {
-                    status: 'discharged',
-                    dischargeDate: new Date(),
-                    notes: notes || existing.notes,
+                    status:        'discharged',
+                    dischargeDate: dischargeDate ? new Date(dischargeDate) : new Date(),
+                    notes:         finalNotes || existing.notes,
                 },
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
-                    bed: { select: { id: true, bedNumber: true, ward: true } },
+                    bed:     { select: { id: true, bedNumber: true, ward: true } },
                 },
             })
         );
@@ -147,4 +186,30 @@ router.patch('/:id/discharge', verifyToken, async (req, res) => {
     }
 });
 
-module.exports = router; 
+// ── DELETE /api/admissions/:id ────────────────────────────────────────────────
+router.delete('/:id', verifyToken, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+
+        // Free bed if occupied by this admission
+        const existing = await withRetry(() =>
+            prisma.admission.findUnique({ where: { id } })
+        );
+        if (!existing) return res.status(404).json({ error: 'Admission not found' });
+
+        if (existing.bedId && existing.status === 'admitted') {
+            await withRetry(() =>
+                prisma.bed.update({ where: { id: existing.bedId }, data: { status: 'available' } })
+            );
+        }
+
+        await withRetry(() => prisma.admission.delete({ where: { id } }));
+        return res.json({ message: 'Admission record deleted' });
+    } catch (err) {
+        console.error('[DELETE /admissions/:id]', err);
+        if (err.code === 'P2025') return res.status(404).json({ error: 'Admission not found' });
+        return res.status(500).json({ error: 'Failed to delete admission' });
+    }
+});
+
+module.exports = router;
