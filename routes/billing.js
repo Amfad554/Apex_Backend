@@ -81,24 +81,26 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
         }
 
         const bill = await withRetry(() =>
-            prisma.billing.create({
-                data: {
-                    hospitalId,
-                    patientId:   parseInt(patientId),
-                    invoiceNumber: generateInvoiceNumber(),
-                    description,
-                    // Store as totalAmount if your schema has it, fall back to amount
-                    ...(prisma.billing.fields?.totalAmount ? { totalAmount: parseFloat(finalAmount) } : { amount: parseFloat(finalAmount) }),
-                    amountPaid:  0,
-                    category:    category || 'consultation',
-                    status:      'unpaid',
-                    ...(dueDate && { dueDate: new Date(dueDate) }),
-                },
-                include: {
-                    patient: { select: { id: true, fullName: true, patientNumber: true } },
-                },
-            })
-        );
+    prisma.billing.create({
+        data: {
+            hospitalId,
+            patientId:     parseInt(patientId),
+            invoiceNumber: generateInvoiceNumber(),
+            description,
+            ...(prisma.billing.fields?.totalAmount 
+                ? { totalAmount: parseFloat(finalAmount) } 
+                : { amount: parseFloat(finalAmount) }),
+            amountPaid: 0,
+            category:   category || 'consultation',
+            status:     'unpaid',
+            ...(dueDate && { dueDate: new Date(dueDate) }),
+            items:      items ?? [],  // ✅ Add this line
+        },
+        include: {
+            patient: { select: { id: true, fullName: true, patientNumber: true } },
+        },
+    })
+);
 
         // Normalize response
         const normalized = {
@@ -188,6 +190,7 @@ router.post('/:id/payment', verifyToken, async (req, res) => {
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
+
         await withRetry(() => prisma.billing.delete({ where: { id } }));
         return res.json({ message: 'Invoice deleted successfully' });
     } catch (err) {
