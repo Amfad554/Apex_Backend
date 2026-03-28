@@ -148,44 +148,32 @@ router.post('/hospital/forgot-password', forgotLimiter, async (req, res) => {
       select: { id: true, hospitalName: true, email: true },
     });
 
-    // Always return 200 — never reveal whether the email exists
     if (!hospital) {
       return res.json({ message: 'If this email is registered, a reset code has been sent.' });
     }
 
-    // 6-digit code, expires in 15 minutes
+    console.log('✅ Hospital found:', hospital.id);  // ADD
+
     const code      = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     const codeHash  = await bcrypt.hash(code, 10);
+
+    console.log('✅ Code hashed');  // ADD
 
     await prisma.hospital.update({
       where: { id: hospital.id },
       data:  { resetCodeHash: codeHash, resetCodeExpiry: expiresAt },
     });
 
-    await sendEmail({
-      to:      hospital.email,
-      subject: 'Your Password Reset Code',
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
-          <h2 style="color:#0A1A3F;margin-bottom:8px;">Password Reset Request</h2>
-          <p style="color:#374151;margin-bottom:24px;">
-            Hi <strong>${hospital.hospitalName}</strong>, here is your 6-digit reset code.
-            It expires in <strong>15 minutes</strong>.
-          </p>
-          <div style="background:#F5F7FA;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
-            <span style="font-size:40px;font-weight:900;letter-spacing:14px;color:#FF5A1F;">${code}</span>
-          </div>
-          <p style="color:#6B7280;font-size:13px;">
-            If you didn't request this, you can safely ignore this email.
-          </p>
-        </div>
-      `,
-    });
+    console.log('✅ Code saved to DB');  // ADD
+
+    await sendEmail({ ... });
+
+    console.log('✅ Email sent');  // ADD
 
     return res.json({ message: 'If this email is registered, a reset code has been sent.' });
   } catch (err) {
-    console.error('[POST /auth/hospital/forgot-password]', err);
+    console.error('[FORGOT PASSWORD ERROR]', err);  // MAKE SURE THIS IS HERE
     return res.status(500).json({ message: 'Failed to process request.' });
   }
 });
