@@ -216,8 +216,11 @@ model Billing {
   appointmentId         Int?           @map("appointment_id")
   invoiceNumber         String         @unique @map("invoice_number")
   items                 Json
+  description           String?        // ✅ Add this
+  category              String?        // ✅ Add this
   totalAmount           Float          @map("total_amount")
   paidAmount            Float          @default(0) @map("paid_amount")
+  amountPaid            Float          @default(0) @map("amount_paid") // ✅ Add this
   paymentMethod         PaymentMethod? @map("payment_method")
   insuranceName         String?        @map("insurance_name")
   insurancePolicyNumber String?        @map("insurance_policy_number")
@@ -230,7 +233,6 @@ model Billing {
   patient               Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
   admission             Admission?     @relation(fields: [admissionId], references: [id])
   appointment           Appointment?   @relation(fields: [appointmentId], references: [id])
-
   @@index([hospitalId])
   @@index([patientId])
   @@index([status])
