@@ -28,6 +28,7 @@
     "prisma": "^6.9.0",
     "react-hot-toast": "^2.6.0",
     "react-paystack": "^6.0.0",
+    "resend": "^6.9.4",
     "ws": "^8.19.0"
   }
 }
