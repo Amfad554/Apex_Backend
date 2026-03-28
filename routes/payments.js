@@ -104,7 +104,7 @@ router.post('/verify', verifyToken, async (req, res) => {
     }
 });
 
-// ── GET /api/payments/subscription ───────────────────────────────────────────
+// ── GET /api/payments/subscriptionn ───────────────────────────────────────────
 router.get('/subscription', verifyToken, async (req, res) => {
     try {
         const hospitalId = req.user.hospitalId;
