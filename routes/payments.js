@@ -47,7 +47,7 @@ router.post('/verify', verifyToken, async (req, res) => {
             });
         }
 
-        const hospitalId = req.user.hospitalId;
+        const hospitalId = req.user.hospital_id;  // ✅ matches JWT payload field name
         if (!hospitalId) {
             return res.status(400).json({ error: 'Could not determine hospital from token. Please log in again.' });
         }
@@ -104,10 +104,10 @@ router.post('/verify', verifyToken, async (req, res) => {
     }
 });
 
-// ── GET /api/payments/subscriptionn ───────────────────────────────────────────
+// ── GET /api/payments/subscription ───────────────────────────────────────────
 router.get('/subscription', verifyToken, async (req, res) => {
     try {
-        const hospitalId = req.user.hospitalId;
+        const hospitalId = req.user.hospital_id;  // ✅ matches JWT payload field name
 
         const subscription = await prisma.subscription.findUnique({ where: { hospitalId } });
 

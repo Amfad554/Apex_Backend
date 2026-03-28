@@ -41,7 +41,7 @@ router.post('/proof', async (req, res) => {
     // ── Email to YOU (admin notification) ─────────────────────────────────────
     await transporter.sendMail({
       from:    `"Apex HMS Payments" <${process.env.EMAIL_USER}>`,
-      to:      process.env.NOTIFY_EMAIL || 'georgechiamaka02@gmail.com',
+      to:      process.env.NOTIFY_EMAIL || ,
       subject: `💰 New Payment Proof — ${plan} Plan | ${hospital}`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b;">
