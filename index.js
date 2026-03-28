@@ -67,6 +67,7 @@ app.use('/api/beds', bedRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/lab-requests', labRequestRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/payments', require('./routes/payments'));
 
 
 app.use('/api/contact', contactRoutes);
