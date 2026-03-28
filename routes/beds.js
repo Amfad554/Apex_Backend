@@ -43,7 +43,7 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
         return res.json({ beds });
     } catch (err) {
         console.error('[GET /beds]', err);
-        return res.status(500).json({ error: 'Failed to fetch beds' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -51,11 +51,15 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
-        const { bedNumber, ward, status } = req.body;
+        const { bedNumber, ward, bedType, status } = req.body;
 
         if (!bedNumber || !ward) {
             return res.status(400).json({ error: 'bedNumber and ward are required' });
         }
+
+        // Validate bedType against schema enum values
+        const validBedTypes = ['general', 'private', 'icu', 'maternity', 'pediatric', 'emergency'];
+        const finalBedType = validBedTypes.includes(bedType) ? bedType : 'general'; // ✅ required field, default to 'general'
 
         const bed = await withRetry(() =>
             prisma.bed.create({
@@ -63,7 +67,8 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
                     hospitalId,
                     bedNumber,
                     ward,
-                    status: status || 'available',
+                    bedType: finalBedType, // ✅ required in schema
+                    status:  status || 'available',
                 },
             })
         );
@@ -72,7 +77,7 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
     } catch (err) {
         console.error('[POST /beds]', err);
         if (err.code === 'P2002') return res.status(409).json({ error: 'Bed number already exists in this hospital' });
-        return res.status(500).json({ error: 'Failed to create bed' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -84,6 +89,12 @@ router.patch('/:id/status', verifyToken, async (req, res) => {
 
         if (!status) return res.status(400).json({ error: 'status is required' });
 
+        // Validate against BedStatus enum: available | occupied | maintenance | reserved
+        const validStatuses = ['available', 'occupied', 'maintenance', 'reserved'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+        }
+
         const bed = await withRetry(() =>
             prisma.bed.update({ where: { id }, data: { status } })
         );
@@ -92,7 +103,7 @@ router.patch('/:id/status', verifyToken, async (req, res) => {
     } catch (err) {
         console.error('[PATCH /beds/:id/status]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Bed not found' });
-        return res.status(500).json({ error: 'Failed to update bed status' });
+        return res.status(500).json({ error: err.message });
     }
 });
 

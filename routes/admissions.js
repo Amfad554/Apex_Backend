@@ -36,27 +36,34 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
                     ...(status && { status }),
                     ...(search && {
                         OR: [
-                            { patient: { fullName: { contains: search, mode: 'insensitive' } } },
-                            { reason: { contains: search, mode: 'insensitive' } },
+                            { patient:        { fullName:        { contains: search, mode: 'insensitive' } } },
+                            { admissionReason:{ contains: search, mode: 'insensitive' } }, // ✅ schema field
                         ],
                     }),
                 },
                 include: {
-                    patient: { select: { id: true, fullName: true, patientNumber: true, phone: true } },
-                    bed:     { select: { id: true, bedNumber: true, ward: true } },
-                    // Include doctor if relation exists in your schema
-                    ...(prisma.admission.fields?.doctorId && {
-                        doctor: { select: { id: true, fullName: true } },
-                    }),
+                    patient:    { select: { id: true, fullName: true, patientNumber: true, phone: true } },
+                    bed:        { select: { id: true, bedNumber: true, ward: true } },
+                    admittedBy: { select: { id: true, fullName: true } }, // ✅ schema relation
                 },
                 orderBy: { createdAt: 'desc' },
             })
         );
 
-        return res.json({ admissions });
+        // Normalize: frontend expects .reason, .notes, .admissionDate, .doctor, .dischargeDate
+        const normalized = admissions.map(a => ({
+            ...a,
+            reason:        a.admissionReason,                     // ✅
+            admissionDate: a.admittedAt,                          // ✅
+            dischargeDate: a.dischargedAt,                        // ✅
+            notes:         a.dischargeNotes,                      // ✅
+            doctor:        a.admittedBy || null,
+        }));
+
+        return res.json({ admissions: normalized });
     } catch (err) {
         console.error('[GET /admissions]', err);
-        return res.status(500).json({ error: 'Failed to fetch admissions' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -85,44 +92,32 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
             );
         }
 
-        // Build data object — only include doctorId if the schema supports it
-        const data = {
-            hospitalId,
-            patientId:     parseInt(patientId),
-            bedId:         bedId ? parseInt(bedId) : null,
-            reason,
-            notes:         notes || null,
-            status:        'admitted',
-            admissionDate: admissionDate ? new Date(admissionDate) : new Date(),
-        };
-
-        // Conditionally add doctorId if field exists on the model
-        try {
-            // This will throw if the field doesn't exist in Prisma schema
-            if (doctorId) data.doctorId = parseInt(doctorId);
-        } catch (_) { /* schema doesn't have doctorId — skip silently */ }
-
         const admission = await withRetry(() =>
             prisma.admission.create({
-                data,
+                data: {
+                    hospitalId,
+                    patientId:       parseInt(patientId),
+                    bedId:           bedId ? parseInt(bedId) : null,
+                    admittedById:    doctorId ? parseInt(doctorId) : null, // ✅ schema field
+                    admissionReason: reason,                                // ✅ schema field
+                    diagnosis:       notes || null,                         // ✅ closest schema field
+                    status:          'admitted',
+                    admittedAt:      admissionDate ? new Date(admissionDate) : new Date(), // ✅ schema field
+                },
                 include: {
-                    patient: { select: { id: true, fullName: true, patientNumber: true, phone: true } },
-                    bed:     { select: { id: true, bedNumber: true, ward: true } },
+                    patient:    { select: { id: true, fullName: true, patientNumber: true, phone: true } },
+                    bed:        { select: { id: true, bedNumber: true, ward: true } },
+                    admittedBy: { select: { id: true, fullName: true } },
                 },
             })
         );
 
-        // Try to attach doctor info if available
-        let result = { ...admission };
-        if (doctorId) {
-            try {
-                const doc = await prisma.staff.findUnique({
-                    where: { id: parseInt(doctorId) },
-                    select: { id: true, fullName: true },
-                });
-                result.doctor = doc;
-            } catch (_) {}
-        }
+        const result = {
+            ...admission,
+            reason:        admission.admissionReason,
+            admissionDate: admission.admittedAt,
+            doctor:        admission.admittedBy || null,
+        };
 
         prisma.notification.create({
             data: {
@@ -137,12 +132,11 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
         return res.status(201).json({ message: 'Patient admitted successfully', admission: result });
     } catch (err) {
         console.error('[POST /admissions]', err);
-        return res.status(500).json({ error: 'Failed to create admission' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
 // ── PATCH /api/admissions/:id/discharge ──────────────────────────────────────
-// Frontend sends: { dischargeNotes, dischargeDate }
 router.patch('/:id/discharge', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
@@ -168,21 +162,30 @@ router.patch('/:id/discharge', verifyToken, async (req, res) => {
             prisma.admission.update({
                 where: { id },
                 data: {
-                    status:        'discharged',
-                    dischargeDate: dischargeDate ? new Date(dischargeDate) : new Date(),
-                    notes:         finalNotes || existing.notes,
+                    status:         'discharged',
+                    dischargedAt:   dischargeDate ? new Date(dischargeDate) : new Date(), // ✅ schema field
+                    dischargeNotes: finalNotes || existing.dischargeNotes,                // ✅ schema field
                 },
                 include: {
-                    patient: { select: { id: true, fullName: true, patientNumber: true } },
-                    bed:     { select: { id: true, bedNumber: true, ward: true } },
+                    patient:    { select: { id: true, fullName: true, patientNumber: true } },
+                    bed:        { select: { id: true, bedNumber: true, ward: true } },
+                    admittedBy: { select: { id: true, fullName: true } },
                 },
             })
         );
 
-        return res.json({ message: 'Patient discharged successfully', admission });
+        const result = {
+            ...admission,
+            reason:        admission.admissionReason,
+            admissionDate: admission.admittedAt,
+            dischargeDate: admission.dischargedAt,
+            doctor:        admission.admittedBy || null,
+        };
+
+        return res.json({ message: 'Patient discharged successfully', admission: result });
     } catch (err) {
         console.error('[PATCH /admissions/:id/discharge]', err);
-        return res.status(500).json({ error: 'Failed to discharge patient' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -191,7 +194,6 @@ router.delete('/:id', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
 
-        // Free bed if occupied by this admission
         const existing = await withRetry(() =>
             prisma.admission.findUnique({ where: { id } })
         );
@@ -208,7 +210,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     } catch (err) {
         console.error('[DELETE /admissions/:id]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Admission not found' });
-        return res.status(500).json({ error: 'Failed to delete admission' });
+        return res.status(500).json({ error: err.message });
     }
 });
 

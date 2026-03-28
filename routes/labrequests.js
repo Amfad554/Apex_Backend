@@ -29,7 +29,6 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
         const hospitalId = parseInt(req.params.hospitalId);
         const { status, search } = req.query;
 
-        // Handle filter values like "sample_collected" sent as "sample collected"
         const normalizedStatus = status ? status.replace(' ', '_') : undefined;
 
         const requests = await withRetry(() =>
@@ -40,45 +39,43 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
                     ...(search && {
                         OR: [
                             { testName: { contains: search, mode: 'insensitive' } },
-                            { patient: { fullName: { contains: search, mode: 'insensitive' } } },
+                            { patient:  { fullName: { contains: search, mode: 'insensitive' } } },
                         ],
                     }),
                 },
                 include: {
-                    patient:           { select: { id: true, fullName: true, patientNumber: true } },
-                    requestedByStaff:  { select: { id: true, fullName: true, role: true } },
+                    patient:     { select: { id: true, fullName: true, patientNumber: true } },
+                    requestedBy: { select: { id: true, fullName: true, role: true } }, // ✅ schema relation name
+                    processedBy: { select: { id: true, fullName: true, role: true } }, // ✅ schema relation name
                 },
-                orderBy: [{ createdAt: 'desc' }],
+                orderBy: { createdAt: 'desc' },
             })
         );
 
-        // Normalize: frontend expects r.doctor, r.urgency, r.requestNumber
+        // Normalize for frontend
         const normalized = requests.map(r => ({
             ...r,
-            doctor:        r.requestedByStaff || null,
-            urgency:       r.urgency || r.priority || 'routine',
-            requestNumber: r.requestNumber || `LAB-${r.id}`,
+            doctor:        r.requestedBy || null,             // frontend reads .doctor
+            requestNumber: `LAB-${r.id}`,                     // no requestNumber in schema, derive it
+            // urgency already exists as field name in schema ✅
         }));
 
         return res.json({ requests: normalized });
     } catch (err) {
         console.error('[GET /lab-requests]', err);
-        return res.status(500).json({ error: 'Failed to fetch lab requests' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
 // ── POST /api/lab-requests/:hospitalId ───────────────────────────────────────
 // Frontend sends: { patientId, doctorId, testName, testType, urgency, notes }
-// Backend schema uses: requestedBy (staff id), priority (not urgency)
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
-        const { patientId, doctorId, testName, testType, urgency, priority, notes } = req.body;
+        const { patientId, doctorId, testName, testType, urgency, notes } = req.body;
 
-        // Use doctorId if provided, otherwise fall back to the logged-in user
-        const requestedBy = doctorId ? parseInt(doctorId) : req.user.id;
-        // Accept either "urgency" (frontend) or "priority" (legacy)
-        const finalPriority = urgency || priority || 'routine';
+        // requestedById is NOT NULL in schema — use doctorId or the logged-in user
+        const requestedById = doctorId ? parseInt(doctorId) : req.user.id;
 
         if (!patientId || !testName) {
             return res.status(400).json({ error: 'patientId and testName are required' });
@@ -88,27 +85,25 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
             prisma.labRequest.create({
                 data: {
                     hospitalId,
-                    patientId:   parseInt(patientId),
-                    requestedBy,
+                    patientId:    parseInt(patientId),
+                    requestedById,                           // ✅ schema field (NOT requestedBy)
                     testName,
-                    testType:    testType || 'blood',
-                    priority:    finalPriority,
-                    notes:       notes || null,
-                    status:      'pending',
+                    testType:     testType || 'blood',
+                    urgency:      urgency  || 'routine',     // ✅ schema field (NOT priority)
+                    resultNotes:  notes || null,             // ✅ schema field (NOT notes)
+                    status:       'pending',
                 },
                 include: {
-                    patient:          { select: { id: true, fullName: true, patientNumber: true } },
-                    requestedByStaff: { select: { id: true, fullName: true, role: true } },
+                    patient:     { select: { id: true, fullName: true, patientNumber: true } },
+                    requestedBy: { select: { id: true, fullName: true, role: true } },
                 },
             })
         );
 
-        // Normalize response to match frontend expectations
         const normalized = {
             ...labRequest,
-            doctor:        labRequest.requestedByStaff || null,
-            urgency:       labRequest.priority,
-            requestNumber: labRequest.requestNumber || `LAB-${labRequest.id}`,
+            doctor:        labRequest.requestedBy || null,
+            requestNumber: `LAB-${labRequest.id}`,
         };
 
         prisma.notification.create({
@@ -124,7 +119,7 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
         return res.status(201).json({ message: 'Lab request created successfully', labRequest: normalized });
     } catch (err) {
         console.error('[POST /lab-requests]', err);
-        return res.status(500).json({ error: 'Failed to create lab request' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -132,38 +127,40 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
 router.patch('/:id/status', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { status, result } = req.body;
+        const { status, result, resultNotes } = req.body;
 
         if (!status) return res.status(400).json({ error: 'status is required' });
 
         const data = { status };
-        if (result)                    data.result     = result;
-        if (status === 'completed')    data.resultDate = new Date();
-        if (status === 'results_ready') data.resultDate = new Date();
+
+        // ✅ schema uses `results` (Json) and `resultNotes` (String) and `completedAt`
+        if (result)                      data.results     = result;
+        if (resultNotes)                 data.resultNotes = resultNotes;
+        if (status === 'sample_collected') data.sampleCollectedAt = new Date();
+        if (status === 'completed')        data.completedAt       = new Date();
 
         const labRequest = await withRetry(() =>
             prisma.labRequest.update({
                 where: { id },
                 data,
                 include: {
-                    patient:          { select: { id: true, fullName: true, patientNumber: true } },
-                    requestedByStaff: { select: { id: true, fullName: true, role: true } },
+                    patient:     { select: { id: true, fullName: true, patientNumber: true } },
+                    requestedBy: { select: { id: true, fullName: true, role: true } },
                 },
             })
         );
 
         const normalized = {
             ...labRequest,
-            doctor:        labRequest.requestedByStaff || null,
-            urgency:       labRequest.priority,
-            requestNumber: labRequest.requestNumber || `LAB-${labRequest.id}`,
+            doctor:        labRequest.requestedBy || null,
+            requestNumber: `LAB-${labRequest.id}`,
         };
 
         return res.json({ message: 'Lab request status updated', labRequest: normalized });
     } catch (err) {
         console.error('[PATCH /lab-requests/:id/status]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Lab request not found' });
-        return res.status(500).json({ error: 'Failed to update lab request status' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -176,7 +173,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     } catch (err) {
         console.error('[DELETE /lab-requests/:id]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Lab request not found' });
-        return res.status(500).json({ error: 'Failed to delete lab request' });
+        return res.status(500).json({ error: err.message });
     }
 });
 

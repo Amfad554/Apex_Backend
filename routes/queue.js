@@ -29,37 +29,42 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
         const hospitalId = parseInt(req.params.hospitalId);
         const { status, department } = req.query;
 
+        // Normalize hyphenated status from frontend → enum underscore
+        const normalizedStatus = status ? status.replace('-', '_') : undefined;
+
         const entries = await withRetry(() =>
             prisma.queue.findMany({
                 where: {
                     hospitalId,
-                    ...(status && { status }),
+                    ...(normalizedStatus && { status: normalizedStatus }),
                     ...(department && {
                         department: { contains: department, mode: 'insensitive' },
                     }),
                 },
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
-                    // Include doctor relation if it exists in your schema
-                    ...(prisma.queue.fields?.doctorId && {
-                        doctor: { select: { id: true, fullName: true } },
-                    }),
+                    doctor:  { select: { id: true, fullName: true } },
                 },
-                orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+                orderBy: [{ priority: 'desc' }, { checkInAt: 'asc' }],
             })
         );
 
-        return res.json({ queue: entries });
+        // Normalize for frontend: expose queueNumber alias and reason alias
+        const normalized = entries.map(e => ({
+            ...e,
+            queueNumber: e.ticketNumber,   // frontend reads queueNumber
+            reason:      e.notes,           // frontend reads reason
+            status:      e.status.replace('_', '-'), // in_progress → in-progress for frontend
+        }));
+
+        return res.json({ queue: normalized });
     } catch (err) {
         console.error('[GET /queue]', err);
-        return res.status(500).json({ error: 'Failed to fetch queue' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
 // ── POST /api/queue/:hospitalId ───────────────────────────────────────────────
-// Frontend sends: { patientId, doctorId, priority, reason }
-// Backend schema expects: patientId, department, priority, notes
-// We map: reason → department (fallback 'General') + notes; doctorId stored if schema allows
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
@@ -69,65 +74,54 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
             return res.status(400).json({ error: 'patientId and reason are required' });
         }
 
-        // Map frontend "reason" to backend "department" field
-        // Use reason as both the department label and notes if no separate department given
         const finalDepartment = department || reason || 'General';
         const finalNotes      = notes || reason || null;
 
-        // Auto-increment queue number for today
+        // Auto-generate ticket number for today  (schema field: ticketNumber)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         const lastEntry = await withRetry(() =>
             prisma.queue.findFirst({
-                where:   { hospitalId, createdAt: { gte: today } },
-                orderBy: { queueNumber: 'desc' },
+                where:   { hospitalId, checkInAt: { gte: today } },
+                orderBy: { ticketNumber: 'desc' },
             })
         );
 
-        const queueNumber = lastEntry ? lastEntry.queueNumber + 1 : 1;
-
-        // Build create data
-        const data = {
-            hospitalId,
-            patientId:   parseInt(patientId),
-            queueNumber,
-            department:  finalDepartment,
-            priority:    priority || 'normal',
-            notes:       finalNotes,
-            status:      'waiting',
-        };
-
-        // Add doctorId if schema supports it
-        if (doctorId) {
-            try { data.doctorId = parseInt(doctorId); } catch (_) {}
-        }
+        // ticketNumber is a String in the schema, e.g. "001", "002"
+        const nextNum     = lastEntry ? (parseInt(lastEntry.ticketNumber) || 0) + 1 : 1;
+        const ticketNumber = nextNum.toString().padStart(3, '0');
 
         const entry = await withRetry(() =>
             prisma.queue.create({
-                data,
+                data: {
+                    hospitalId,
+                    patientId:    parseInt(patientId),
+                    ticketNumber,                           // ✅ schema field
+                    department:   finalDepartment,
+                    priority:     priority || 'normal',
+                    notes:        finalNotes,
+                    status:       'waiting',
+                    ...(doctorId && { doctorId: parseInt(doctorId) }), // ✅ field exists in schema
+                },
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
+                    doctor:  { select: { id: true, fullName: true } },
                 },
             })
         );
 
-        // Attach doctor info manually if we stored doctorId
-        let result = { ...entry, reason: finalNotes };
-        if (doctorId) {
-            try {
-                const doc = await prisma.staff.findUnique({
-                    where:  { id: parseInt(doctorId) },
-                    select: { id: true, fullName: true },
-                });
-                result.doctor = doc;
-            } catch (_) {}
-        }
+        const result = {
+            ...entry,
+            queueNumber: entry.ticketNumber,
+            reason:      entry.notes,
+            status:      entry.status.replace('_', '-'),
+        };
 
         return res.status(201).json({ message: 'Added to queue successfully', entry: result });
     } catch (err) {
         console.error('[POST /queue]', err);
-        return res.status(500).json({ error: 'Failed to add to queue' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -135,14 +129,17 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
 router.patch('/:id/status', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { status } = req.body;
+        let { status } = req.body;
 
         if (!status) return res.status(400).json({ error: 'status is required' });
 
-        const data = { status };
-        if (status === 'called')       data.calledAt = new Date();
-        if (status === 'in-progress')  data.servedAt = new Date();
-        if (status === 'completed')    data.servedAt = new Date();
+        // Normalize frontend hyphen → DB underscore  (in-progress → in_progress)
+        const dbStatus = status.replace('-', '_');
+
+        const data = { status: dbStatus };
+        if (dbStatus === 'called')       data.calledAt    = new Date();
+        if (dbStatus === 'completed')    data.completedAt = new Date(); // ✅ schema field
+        if (dbStatus === 'in_progress')  {}                              // no timestamp for this
 
         const entry = await withRetry(() =>
             prisma.queue.update({
@@ -150,15 +147,23 @@ router.patch('/:id/status', verifyToken, async (req, res) => {
                 data,
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
+                    doctor:  { select: { id: true, fullName: true } },
                 },
             })
         );
 
-        return res.json({ message: 'Queue status updated', entry });
+        const result = {
+            ...entry,
+            queueNumber: entry.ticketNumber,
+            reason:      entry.notes,
+            status:      entry.status.replace('_', '-'),
+        };
+
+        return res.json({ message: 'Queue status updated', entry: result });
     } catch (err) {
         console.error('[PATCH /queue/:id/status]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Queue entry not found' });
-        return res.status(500).json({ error: 'Failed to update queue status' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -171,7 +176,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     } catch (err) {
         console.error('[DELETE /queue/:id]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Queue entry not found' });
-        return res.status(500).json({ error: 'Failed to remove from queue' });
+        return res.status(500).json({ error: err.message });
     }
 });
 

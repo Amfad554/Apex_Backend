@@ -40,7 +40,7 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
                     ...(search && {
                         OR: [
                             { invoiceNumber: { contains: search, mode: 'insensitive' } },
-                            { description: { contains: search, mode: 'insensitive' } },
+                            { description:   { contains: search, mode: 'insensitive' } },
                             { patient: { fullName: { contains: search, mode: 'insensitive' } } },
                         ],
                     }),
@@ -52,17 +52,17 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
             })
         );
 
-        // Normalize field names so frontend always gets totalAmount + amountPaid
+        // Normalize: schema has both paidAmount and amountPaid — expose amountPaid to frontend
         const normalized = bills.map(b => ({
             ...b,
-            totalAmount: b.totalAmount ?? b.amount ?? 0,
-            amountPaid:  b.amountPaid  ?? (b.status === 'paid' ? (b.totalAmount ?? b.amount ?? 0) : 0),
+            totalAmount: b.totalAmount,                         // ✅ schema field
+            amountPaid:  b.amountPaid ?? b.paidAmount ?? 0,    // ✅ both exist in schema
         }));
 
         return res.json({ bills: normalized });
     } catch (err) {
         console.error('[GET /billing]', err);
-        return res.status(500).json({ error: 'Failed to fetch billing records' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -71,42 +71,38 @@ router.get('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
 router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => {
     try {
         const hospitalId = parseInt(req.params.hospitalId);
-        const { patientId, description, totalAmount, amount, category, dueDate, items } = req.body;
+        const { patientId, description, totalAmount, amount, category, items } = req.body;
 
-        // Accept either totalAmount (frontend) or amount (legacy)
-        const finalAmount = totalAmount ?? amount;
+        const finalAmount = parseFloat(totalAmount ?? amount ?? 0);
 
-        if (!patientId || !description || finalAmount === undefined) {
+        if (!patientId || !description || !finalAmount) {
             return res.status(400).json({ error: 'patientId, description, and totalAmount are required' });
         }
 
         const bill = await withRetry(() =>
-    prisma.billing.create({
-        data: {
-            hospitalId,
-            patientId:     parseInt(patientId),
-            invoiceNumber: generateInvoiceNumber(),
-            description,
-            ...(prisma.billing.fields?.totalAmount 
-                ? { totalAmount: parseFloat(finalAmount) } 
-                : { amount: parseFloat(finalAmount) }),
-            amountPaid: 0,
-            category:   category || 'consultation',
-            status:     'unpaid',
-            ...(dueDate && { dueDate: new Date(dueDate) }),
-            items:      items ?? [],  // ✅ Add this line
-        },
-        include: {
-            patient: { select: { id: true, fullName: true, patientNumber: true } },
-        },
-    })
-);
+            prisma.billing.create({
+                data: {
+                    hospitalId,
+                    patientId:     parseInt(patientId),
+                    invoiceNumber: generateInvoiceNumber(),
+                    description,                              // ✅ exists in schema
+                    category:      category || 'consultation', // ✅ exists in schema
+                    totalAmount:   finalAmount,               // ✅ schema field
+                    paidAmount:    0,                         // ✅ schema field
+                    amountPaid:    0,                         // ✅ schema field
+                    items:         items ?? [],               // ✅ schema field (Json, required)
+                    status:        'unpaid',
+                    // NOTE: dueDate does NOT exist in your schema — removed
+                },
+                include: {
+                    patient: { select: { id: true, fullName: true, patientNumber: true } },
+                },
+            })
+        );
 
-        // Normalize response
         const normalized = {
             ...bill,
-            totalAmount: bill.totalAmount ?? bill.amount ?? parseFloat(finalAmount),
-            amountPaid:  bill.amountPaid ?? 0,
+            amountPaid: bill.amountPaid ?? 0,
         };
 
         prisma.notification.create({
@@ -122,7 +118,7 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
         return res.status(201).json({ message: 'Invoice created successfully', bill: normalized });
     } catch (err) {
         console.error('[POST /billing]', err);
-        return res.status(500).json({ error: 'Failed to create invoice' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -131,8 +127,7 @@ router.post('/:hospitalId', verifyToken, belongsToHospital, async (req, res) => 
 router.post('/:id/payment', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        // Accept both naming conventions
-        const { amount, method, paymentMethod, notes, status } = req.body;
+        const { amount, method, paymentMethod } = req.body;
 
         const finalMethod = paymentMethod || method;
         const payAmount   = parseFloat(amount || 0);
@@ -141,30 +136,27 @@ router.post('/:id/payment', verifyToken, async (req, res) => {
             return res.status(400).json({ error: 'method (payment method) is required' });
         }
 
-        // Fetch current bill to compute new amountPaid and status
         const existing = await withRetry(() => prisma.billing.findUnique({ where: { id } }));
         if (!existing) return res.status(404).json({ error: 'Invoice not found' });
 
-        const currentTotal = existing.totalAmount ?? existing.amount ?? 0;
-        const currentPaid  = existing.amountPaid  ?? 0;
+        const currentTotal = existing.totalAmount ?? 0;
+        const currentPaid  = existing.amountPaid ?? existing.paidAmount ?? 0;
         const newPaid      = currentPaid + payAmount;
 
         let newStatus = 'partial';
         if (newPaid >= currentTotal) newStatus = 'paid';
         else if (newPaid <= 0)       newStatus = 'unpaid';
 
-        // Use provided status override if given (legacy support)
-        const finalStatus = status || newStatus;
-
         const bill = await withRetry(() =>
             prisma.billing.update({
                 where: { id },
                 data: {
-                    paymentMethod: finalMethod,
-                    amountPaid:    newPaid,
-                    status:        finalStatus,
-                    paidAt:        finalStatus === 'paid' ? new Date() : null,
-                    ...(notes && { notes }),
+                    paymentMethod: finalMethod,     // ✅ schema field
+                    amountPaid:    newPaid,          // ✅ schema field
+                    paidAmount:    newPaid,          // ✅ keep both in sync
+                    status:        newStatus,
+                    paidAt:        newStatus === 'paid' ? new Date() : null,
+                    // NOTE: `notes` does NOT exist on Billing in schema — removed
                 },
                 include: {
                     patient: { select: { id: true, fullName: true, patientNumber: true } },
@@ -172,17 +164,11 @@ router.post('/:id/payment', verifyToken, async (req, res) => {
             })
         );
 
-        const normalized = {
-            ...bill,
-            totalAmount: bill.totalAmount ?? bill.amount ?? 0,
-            amountPaid:  bill.amountPaid  ?? newPaid,
-        };
-
-        return res.json({ message: 'Payment recorded successfully', bill: normalized });
+        return res.json({ message: 'Payment recorded successfully', bill });
     } catch (err) {
         console.error('[POST /billing/:id/payment]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Invoice not found' });
-        return res.status(500).json({ error: 'Failed to record payment' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -190,13 +176,12 @@ router.post('/:id/payment', verifyToken, async (req, res) => {
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-
         await withRetry(() => prisma.billing.delete({ where: { id } }));
         return res.json({ message: 'Invoice deleted successfully' });
     } catch (err) {
         console.error('[DELETE /billing/:id]', err);
         if (err.code === 'P2025') return res.status(404).json({ error: 'Invoice not found' });
-        return res.status(500).json({ error: 'Failed to delete invoice' });
+        return res.status(500).json({ error: err.message });
     }
 });
 
