@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../config/prisma');
 const { verifyToken, isSuperAdmin } = require('../middleware/authMiddleware');
+const { sendHospitalApprovalEmail } = require('../lib/mailer');
 
 // Apply auth middleware to all admin routes
 router.use(verifyToken, isSuperAdmin);
@@ -99,6 +100,35 @@ router.get('/stats', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch statistics' });
+  }
+});
+router.put('/hospitals/:id/approve', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    const hospitalId = parseInt(req.params.id);
+
+    const hospital = await prisma.hospital.update({
+      where: { id: hospitalId },
+      data:  { status: 'approved' },
+    });
+
+    // ✅ Send approval email
+    await sendHospitalApprovalEmail({
+      to:           hospital.email,
+      hospitalName: hospital.hospitalName,
+      adminName:    hospital.adminName,
+    });
+
+    return res.json({
+      message: `Hospital approved successfully.`,
+      hospital: {
+        id:     hospital.id,
+        name:   hospital.hospitalName,
+        status: hospital.status,
+      },
+    });
+  } catch (err) {
+    console.error('[PUT /admin/hospitals/:id/approve]', err);
+    return res.status(500).json({ error: 'Failed to approve hospital.' });
   }
 });
 
