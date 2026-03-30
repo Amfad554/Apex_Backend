@@ -334,6 +334,19 @@ model LabRequest {
   @@map("lab_requests")
 }
 
+model ContactSubmission {
+  id                String   @id @default(cuid())
+  administratorName String
+  email             String
+  phone             String
+  hospitalName      String
+  hospitalType      String
+  message           String
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("contact_submissions")
+}
+
 // ─── NEW ENUMS ────────────────────────────────────────────────────────────────
 
 enum BillingStatus {
