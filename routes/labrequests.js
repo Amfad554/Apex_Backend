@@ -6,7 +6,7 @@ const {
     createLabRequest,
     updateLabRequestStatus,
     deleteLabRequest,
-} = require('../controllers/labRequestController');
+} = require('../controllers/labrequestController');
 
 router.get('/:hospitalId',      verifyToken, belongsToHospital, getLabRequests);
 router.post('/:hospitalId',     verifyToken, belongsToHospital, createLabRequest);
