@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { verifyToken, isHospitalAdmin, belongsToHospital, requireRole } = require('../middleware/authMiddleware');
-const appointmentsController = require('../controllers/appointments.controller');
+const appointmentsController = require('../controllers/appoitmentController');
 
 router.get(   '/:hospitalId', verifyToken, belongsToHospital, appointmentsController.getAppointments);
 router.post(  '/',            verifyToken,                    appointmentsController.createAppointment);

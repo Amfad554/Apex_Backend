@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { verifyToken, belongsToHospital } = require('../middleware/authMiddleware');
-const admissionsController = require('../controllers/admissions.controller');
+const admissionsController = require('../controllers/admissionController');
 
 router.get(   '/:hospitalId',        verifyToken, belongsToHospital, admissionsController.getAdmissions);
 router.post(  '/:hospitalId',        verifyToken, belongsToHospital, admissionsController.createAdmission);
