@@ -14,8 +14,8 @@ const sendVerifyEmail = async (email, token) => {
 
     await transporter.sendMail({
         to: email,
-        subject: 'Verify your ApexHMS Account',
-        html: `<h3>Welcome to ApexHMS!</h3>
+        subject: 'Verify your ApexCare Account',
+        html: `<h3>Welcome to ApexCare!</h3>
                <p>Please click the link below to verify your account:</p>
                <a href="${url}">Verify Email</a>`
     });
