@@ -1,7 +1,7 @@
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const prisma   = require('../lib/prisma');
-const { sendEmail } = require('../lib/mailer');
+const { sendEmail, sendHospitalPendingEmail } = require('../lib/mailer');
 
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -56,6 +56,18 @@ exports.hospitalRegister = async (req, res) => {
                 status: 'pending',
             },
         });
+
+        // ── Send pending-approval notification email ──────────────────────────
+        try {
+            await sendHospitalPendingEmail({
+                to:           email.toLowerCase().trim(),
+                hospitalName: hospitalName.trim(),
+                adminName:    adminName.trim(),
+            });
+        } catch (mailErr) {
+            // Log but don't fail the registration if email sending fails
+            console.error('[hospitalRegister] Failed to send pending email:', mailErr.message);
+        }
 
         return res.status(201).json({ message: 'Registration successful! Awaiting admin approval.' });
     } catch (err) {
@@ -144,7 +156,7 @@ exports.hospitalForgotPassword = async (req, res) => {
 
         await sendEmail({
             to:      hospital.email,
-            subject: 'Your Password Reset Code',
+            subject: 'Your Password Reset Code — ApexCare',
             html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
           <h2 style="color:#0A1A3F;margin-bottom:8px;">Password Reset Request</h2>
@@ -158,6 +170,7 @@ exports.hospitalForgotPassword = async (req, res) => {
           <p style="color:#6B7280;font-size:13px;">
             If you didn't request this, you can safely ignore this email.
           </p>
+          <p style="color:#9ca3af;font-size:12px;margin-top:24px;">© ApexCare Platform · Powered by Anchorsoft Innovation Limited</p>
         </div>
       `,
         });
