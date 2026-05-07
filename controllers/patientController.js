@@ -1,9 +1,8 @@
 const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
 const { sendPatientCredentials } = require('../lib/mailer');
+const prisma = require('../lib/prisma');
 
-const prisma = new PrismaClient();
 
 const generateTempPassword  = () => Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
 const generatePatientNumber = () => 'PAT-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
