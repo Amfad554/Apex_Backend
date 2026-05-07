@@ -1,4 +1,4 @@
-const prisma  = require('../config/prisma');
+const prisma = require('../lib/prisma');
 const { sendHospitalApprovalEmail } = require('../lib/mailer');
 
 // GET /api/admin/hospitals
