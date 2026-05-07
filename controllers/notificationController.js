@@ -1,25 +1,25 @@
 const prisma = require('../lib/prisma');
 
-// ── GET /api/notifications ────────────────────────────────────────────────────
 const getNotifications = async (req, res) => {
     try {
         const { id, role, hospital_id } = req.user;
 
-        const where = {
-            OR: [
-                { recipientId: id, recipientRole: role },
-                ...(hospital_id ? [{ hospitalId: hospital_id, recipientId: null }] : []),
-            ],
-        };
-
         const notifications = await prisma.notification.findMany({
-            where,
+            where: {
+                hospitalId: hospital_id,
+                OR: [
+                    { recipientId: id },                         // sent to this specific user
+                    { recipientRole: role, recipientId: null },  // sent to their role
+                    { recipientId: null, recipientRole: null },  // broadcast to whole hospital
+                ],
+            },
             orderBy: { createdAt: 'desc' },
             take: 50,
         });
 
         const unreadCount = notifications.filter(n => !n.read).length;
         return res.json({ notifications, unreadCount });
+
     } catch (err) {
         console.error('[GET /notifications]', err);
         return res.status(500).json({ error: 'Failed to fetch notifications' });
@@ -31,7 +31,7 @@ const markAsRead = async (req, res) => {
     try {
         await prisma.notification.update({
             where: { id: parseInt(req.params.id) },
-            data:  { read: true },
+            data: { read: true },
         });
         return res.json({ success: true });
     } catch (err) {

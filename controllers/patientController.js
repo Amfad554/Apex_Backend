@@ -1,10 +1,10 @@
 const bcrypt = require('bcryptjs');
-const jwt    = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 const { sendPatientCredentials } = require('../lib/mailer');
 const prisma = require('../lib/prisma');
 
 
-const generateTempPassword  = () => Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
+const generateTempPassword = () => Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
 const generatePatientNumber = () => 'PAT-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
 
 async function withRetry(fn, retries = 3, delayMs = 2000) {
@@ -22,7 +22,7 @@ async function withRetry(fn, retries = 3, delayMs = 2000) {
 
             if (isConnectionErr && attempt < retries) {
                 console.warn(`[patients] DB connection error, retrying (${attempt}/${retries})...`);
-                try { await prisma.$queryRaw`SELECT 1`; } catch (_) {}
+                try { await prisma.$queryRaw`SELECT 1`; } catch (_) { }
                 await new Promise(res => setTimeout(res, delayMs));
             } else {
                 throw err;
@@ -55,12 +55,12 @@ const loginPatient = async (req, res) => {
         return res.json({
             token,
             user: {
-                id:            patient.id,
-                fullName:      patient.fullName,
-                email:         patient.email,
+                id: patient.id,
+                fullName: patient.fullName,
+                email: patient.email,
                 patientNumber: patient.patientNumber,
-                role:          'patient',
-                hospital_id:   patient.hospitalId,
+                role: 'patient',
+                hospital_id: patient.hospitalId,
             },
         });
     } catch (err) {
@@ -110,8 +110,8 @@ const createPatient = async (req, res) => {
             prisma.hospital.findUnique({ where: { id: hospitalId }, select: { hospitalName: true } })
         );
 
-        const tempPassword  = generateTempPassword();
-        const passwordHash  = await bcrypt.hash(tempPassword, 12);
+        const tempPassword = generateTempPassword();
+        const passwordHash = await bcrypt.hash(tempPassword, 12);
         const patientNumber = generatePatientNumber();
 
         const patient = await withRetry(() =>
@@ -119,16 +119,16 @@ const createPatient = async (req, res) => {
                 data: {
                     hospitalId,
                     patientNumber,
-                    fullName:          fullName.trim(),
-                    dateOfBirth:       new Date(dateOfBirth),
-                    gender:            gender || 'male',
+                    fullName: fullName.trim(),
+                    dateOfBirth: new Date(dateOfBirth),
+                    gender: gender || 'male',
                     phone,
-                    email:             email ? email.toLowerCase().trim() : null,
+                    email: email ? email.toLowerCase().trim() : null,
                     address,
-                    bloodGroup:        bloodGroup        || null,
+                    bloodGroup: bloodGroup || null,
                     medicalConditions: medicalConditions || null,
-                    nextOfKinName:     nextOfKinName     || null,
-                    nextOfKinPhone:    nextOfKinPhone    || null,
+                    nextOfKinName: nextOfKinName || null,
+                    nextOfKinPhone: nextOfKinPhone || null,
                     passwordHash,
                 },
                 select: {
@@ -143,23 +143,22 @@ const createPatient = async (req, res) => {
         prisma.notification.create({
             data: {
                 hospitalId,
-                recipientId:   null,
-                recipientRole: null,
-                type:    'patient_registered',
-                title:   'New Patient Registered',
+                recipientId: null,
+                recipientRole: 'hospital_admin', // only admins see new patient alerts
+                type: 'patient_registered',
+                title: 'New Patient Registered',
                 message: `${fullName.trim()} (${patientNumber}) has been registered.`,
-                link:    'patients',
+                link: 'patients',
             },
-        }).catch(err => console.error('[Notification] patient_registered:', err.message));
-
+        }).catch(err => console.error('[Notification] Failed to create notification:', err.message));
         if (email) {
             sendPatientCredentials({
-                to:            email,
-                fullName:      fullName.trim(),
-                email:         email.toLowerCase().trim(),
+                to: email,
+                fullName: fullName.trim(),
+                email: email.toLowerCase().trim(),
                 tempPassword,
                 patientNumber,
-                hospitalName:  hospital?.hospitalName || 'Your Hospital',
+                hospitalName: hospital?.hospitalName || 'Your Hospital',
             }).catch(err => console.error('[Email] Failed to send patient credentials:', err.message));
         }
 
@@ -183,9 +182,9 @@ const getPatients = async (req, res) => {
                     hospitalId,
                     ...(search && {
                         OR: [
-                            { fullName:      { contains: search, mode: 'insensitive' } },
+                            { fullName: { contains: search, mode: 'insensitive' } },
                             { patientNumber: { contains: search, mode: 'insensitive' } },
-                            { email:         { contains: search, mode: 'insensitive' } },
+                            { email: { contains: search, mode: 'insensitive' } },
                         ],
                     }),
                 },
@@ -210,7 +209,7 @@ const getPatients = async (req, res) => {
 // ── DELETE /api/patients/:id ──────────────────────────────────────────────────
 const deletePatient = async (req, res) => {
     try {
-        const id         = parseInt(req.params.id);
+        const id = parseInt(req.params.id);
         const hospitalId = req.user.hospital_id;
 
         const patient = await withRetry(() =>

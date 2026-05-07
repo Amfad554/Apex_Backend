@@ -1,8 +1,8 @@
 const bcrypt = require('bcryptjs');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { sendStaffCredentials } = require('../lib/mailer');
 
-const prisma = new PrismaClient();
+
 
 const generateTempPassword = () => Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
 
@@ -21,7 +21,7 @@ async function withRetry(fn, retries = 3, delayMs = 2000) {
 
             if (isConnectionErr && attempt < retries) {
                 console.warn(`[staff] DB connection error, retrying (${attempt}/${retries})...`);
-                try { await prisma.$queryRaw`SELECT 1`; } catch (_) {}
+                try { await prisma.$queryRaw`SELECT 1`; } catch (_) { }
                 await new Promise(res => setTimeout(res, delayMs));
             } else {
                 throw err;
@@ -44,7 +44,7 @@ const getStaff = async (req, res) => {
                     ...(search && {
                         OR: [
                             { fullName: { contains: search, mode: 'insensitive' } },
-                            { email:    { contains: search, mode: 'insensitive' } },
+                            { email: { contains: search, mode: 'insensitive' } },
                         ],
                     }),
                 },
@@ -95,12 +95,12 @@ const createStaff = async (req, res) => {
             prisma.hospitalStaff.create({
                 data: {
                     hospitalId,
-                    fullName:   fullName.trim(),
-                    email:      email.toLowerCase().trim(),
+                    fullName: fullName.trim(),
+                    email: email.toLowerCase().trim(),
                     role,
                     department: department || null,
-                    specialty:  specialty  || null,
-                    phone:      phone      || null,
+                    specialty: specialty || null,
+                    phone: phone || null,
                     passwordHash,
                     status: 'active',
                 },
@@ -115,19 +115,19 @@ const createStaff = async (req, res) => {
         prisma.notification.create({
             data: {
                 hospitalId,
-                recipientId:   null,
-                recipientRole: null,
-                type:    'staff_added',
-                title:   'New Staff Member Added',
+                recipientId: null,
+                recipientRole: 'hospital_admin', // only admins see new staff alerts
+                type: 'staff_added',
+                title: 'New Staff Member Added',
                 message: `${fullName.trim()} has been added as a ${role}.`,
-                link:    'staff',
+                link: 'staff',
             },
-        }).catch(err => console.error('[Notification] staff_added:', err.message));
+        }).catch(err => console.error('[Notification] Failed to create notification:', err.message));
 
         sendStaffCredentials({
-            to:           email,
-            fullName:     fullName.trim(),
-            email:        email.toLowerCase().trim(),
+            to: email,
+            fullName: fullName.trim(),
+            email: email.toLowerCase().trim(),
             tempPassword,
             hospitalName: hospital?.hospitalName || 'Your Hospital',
             role,
@@ -143,7 +143,7 @@ const createStaff = async (req, res) => {
 // ── PATCH /api/staff/:id/status ───────────────────────────────────────────────
 const updateStaffStatus = async (req, res) => {
     try {
-        const id         = parseInt(req.params.id);
+        const id = parseInt(req.params.id);
         const hospitalId = req.user.hospital_id;
         const { status } = req.body;
 
@@ -159,7 +159,7 @@ const updateStaffStatus = async (req, res) => {
         const updated = await withRetry(() =>
             prisma.hospitalStaff.update({
                 where: { id },
-                data:  { status },
+                data: { status },
                 select: { id: true, fullName: true, status: true },
             })
         );
@@ -174,7 +174,7 @@ const updateStaffStatus = async (req, res) => {
 // ── DELETE /api/staff/:id ─────────────────────────────────────────────────────
 const deleteStaff = async (req, res) => {
     try {
-        const id         = parseInt(req.params.id);
+        const id = parseInt(req.params.id);
         const hospitalId = req.user.hospital_id;
 
         const staff = await withRetry(() =>
