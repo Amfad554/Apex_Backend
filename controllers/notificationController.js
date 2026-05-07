@@ -73,9 +73,33 @@ const deleteNotification = async (req, res) => {
     }
 };
 
+// ── DELETE /api/notifications/all ─────────────────────────────────────────────
+const deleteAllNotifications = async (req, res) => {
+    try {
+        const { id, role, hospital_id } = req.user;
+
+        await prisma.notification.deleteMany({
+            where: {
+                hospitalId: hospital_id,
+                OR: [
+                    { recipientId: id },
+                    { recipientRole: role, recipientId: null },
+                    { recipientId: null, recipientRole: null },
+                ],
+            },
+        });
+
+        return res.json({ success: true });
+    } catch (err) {
+        console.error('[DELETE /notifications/all]', err);
+        return res.status(500).json({ error: 'Failed to clear notifications' });
+    }
+};
+
 module.exports = {
     getNotifications,
     markAsRead,
     markAllAsRead,
     deleteNotification,
+    deleteAllNotifications, // ← add this
 };
