@@ -1,7 +1,7 @@
-const { ApiClient, TransactionalEmailsApi, SendSmtpEmail } = require('@getbrevo/brevo');
-const client = ApiClient.instance;
-client.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
-const transactionalApi = new TransactionalEmailsApi();
+const axios = require('axios');
+
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+
 const FROM = {
     email: process.env.BREVO_SENDER_EMAIL,
     name: process.env.BREVO_SENDER_NAME || 'ApexCare',
@@ -9,12 +9,21 @@ const FROM = {
 
 // ─── Core send helper ─────────────────────────────────────────────────────────
 async function sendEmail({ to, subject, html }) {
-    const email = new SendSmtpEmail();  // ← no more Brevo.SendSmtpEmail
-    email.sender = FROM;
-    email.to = [{ email: to }];
-    email.subject = subject;
-    email.htmlContent = html;
-    return transactionalApi.sendTransacEmail(email);
+    await axios.post(
+        'https://api.brevo.com/v3/smtp/email',
+        {
+            sender: FROM,
+            to: [{ email: to }],
+            subject: subject,
+            htmlContent: html,
+        },
+        {
+            headers: {
+                'api-key': BREVO_API_KEY,
+                'Content-Type': 'application/json',
+            },
+        }
+    );
 }
 
 // ─── Email verification ───────────────────────────────────────────────────────
