@@ -1,7 +1,7 @@
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const prisma   = require('../lib/prisma');
-const { sendEmail, sendHospitalPendingEmail } = require('../lib/mailer');
+const { sendEmail, sendHospitalPendingEmail } = require('../utils/SendEmail');
 
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
