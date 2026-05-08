@@ -1,21 +1,18 @@
-const Brevo = require('@getbrevo/brevo');
-
-const client = Brevo.ApiClient.instance;
+const { ApiClient, TransactionalEmailsApi, SendSmtpEmail } = require('@getbrevo/brevo');
+const client = ApiClient.instance;
 client.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
-
-const transactionalApi = new Brevo.TransactionalEmailsApi();
-
+const transactionalApi = new TransactionalEmailsApi();
 const FROM = {
     email: process.env.BREVO_SENDER_EMAIL,
-    name:  process.env.BREVO_SENDER_NAME || 'ApexCare',
+    name: process.env.BREVO_SENDER_NAME || 'ApexCare',
 };
 
 // ─── Core send helper ─────────────────────────────────────────────────────────
 async function sendEmail({ to, subject, html }) {
-    const email = new Brevo.SendSmtpEmail();
-    email.sender      = FROM;
-    email.to          = [{ email: to }];
-    email.subject     = subject;
+    const email = new SendSmtpEmail();  // ← no more Brevo.SendSmtpEmail
+    email.sender = FROM;
+    email.to = [{ email: to }];
+    email.subject = subject;
     email.htmlContent = html;
     return transactionalApi.sendTransacEmail(email);
 }
@@ -24,7 +21,7 @@ async function sendEmail({ to, subject, html }) {
 async function sendVerifyEmail(emailAddr, token) {
     const url = `${process.env.CLIENT_URL || 'http://localhost:5173'}/verify-email?token=${token}`;
     return sendEmail({
-        to:      emailAddr,
+        to: emailAddr,
         subject: 'Verify your ApexCare account',
         html: `
       <!DOCTYPE html>
@@ -189,7 +186,7 @@ async function sendContactEmail(contact) {
     const ADMIN = process.env.ADMIN_EMAIL;
 
     await sendEmail({
-        to:      ADMIN,
+        to: ADMIN,
         subject: `[ApexCare] New Enquiry — ${contact.hospitalName}`,
         html: `
       <!DOCTYPE html>
@@ -218,7 +215,7 @@ async function sendContactEmail(contact) {
     });
 
     await sendEmail({
-        to:      contact.email,
+        to: contact.email,
         subject: `We received your inquiry — ApexCare`,
         html: `
       <!DOCTYPE html>
