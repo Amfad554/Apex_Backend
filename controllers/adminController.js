@@ -1,5 +1,9 @@
 const prisma = require('../lib/prisma');
-const { sendHospitalApprovalEmail } = require('../lib/mailer');
+const {
+    sendHospitalApprovalEmail,
+    sendHospitalSuspensionEmail,
+    sendHospitalRejectionEmail,
+} = require('../utils/SendEmail');
 
 // GET /api/admin/hospitals
 exports.getAllHospitals = async (req, res) => {
@@ -48,7 +52,6 @@ exports.approveHospital = async (req, res) => {
             data:  { status: 'approved', approvedAt: new Date() },
         });
 
-        // Fire approval email — non-blocking so UI doesn't stall if email fails
         sendHospitalApprovalEmail({
             to:           hospital.email,
             hospitalName: hospital.hospitalName,
@@ -74,6 +77,12 @@ exports.suspendHospital = async (req, res) => {
             where: { id: hospitalId },
             data:  { status: 'suspended' },
         });
+
+        sendHospitalSuspensionEmail({
+            to:           hospital.email,
+            hospitalName: hospital.hospitalName,
+            adminName:    hospital.adminName,
+        }).catch(err => console.error('[suspendHospital] Email failed:', err.message));
 
         return res.json({
             message:  'Hospital suspended.',
@@ -113,6 +122,12 @@ exports.deleteHospital = async (req, res) => {
         const hospital = await prisma.hospital.delete({
             where: { id: hospitalId },
         });
+
+        sendHospitalRejectionEmail({
+            to:           hospital.email,
+            hospitalName: hospital.hospitalName,
+            adminName:    hospital.adminName,
+        }).catch(err => console.error('[deleteHospital] Email failed:', err.message));
 
         return res.json({
             message:  'Hospital deleted.',
