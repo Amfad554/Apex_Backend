@@ -6,7 +6,7 @@ const {
     sendHospitalApprovalEmail,
     sendHospitalSuspensionEmail,
     sendHospitalRejectionEmail,
-} = require('../utils/emailService');
+} = require('../utils/SendEmail');
 // All admin routes require a valid super_admin token
 router.use(verifyToken);
 router.use(requireRole(['super_admin']));
