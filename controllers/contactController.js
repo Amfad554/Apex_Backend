@@ -1,5 +1,5 @@
 const prisma = require('../lib/prisma');
-const { sendContactEmail } = require('../lib/mailer');
+const { sendContactEmail } = require('../utils/SendEmail');
 
 // POST /api/contact
 exports.submitContact = async (req, res) => {

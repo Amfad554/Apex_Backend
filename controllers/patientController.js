@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { sendPatientCredentials } = require('../lib/mailer');
+const { sendPatientCredentials } = require('../utils/SendEmail');
 const prisma = require('../lib/prisma');
 
 

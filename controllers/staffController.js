@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
-const { sendStaffCredentials } = require('../lib/mailer');
+const { sendStaffCredentials } = require('../utils/SendEmail');
 
 
 
